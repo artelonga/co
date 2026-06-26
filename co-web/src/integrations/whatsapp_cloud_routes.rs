@@ -15,6 +15,10 @@
 //! default the `whatsapp-bot` bridge) and the reply is sent via
 //! [`crate::notification_providers::CloudApiProvider`] — **asynchronously**, so
 //! Meta still gets its fast 200 ack while the model call runs in the background.
+//!
+//! CO-489: the inbound `phone_number_id` (which WhatsApp business number was
+//! messaged) is forwarded to the brain so a single bot deploy can route to the
+//! right tenant universe (the brain maps `phone_number_id → universe`).
 
 use std::collections::HashMap;
 
@@ -118,18 +122,28 @@ async fn reply_to(msg: &InboundMsg) -> Result<(), String> {
     let provider = CloudApiProvider::from_env()
         .ok_or("CloudApiProvider not configured (WHATSAPP_CLOUD_TOKEN/PHONE_NUMBER_ID)")?;
     let client = reqwest::Client::new();
-    let reply = fetch_brain_reply(&client, &brain_url(), &msg.text)
+    let reply = fetch_brain_reply(&client, &brain_url(), &msg.text, &msg.phone_number_id)
         .await
         .unwrap_or_else(|| "Recebi sua mensagem — já te respondo! 🙂".to_string());
     provider.send(&client, &msg.from, &reply).await
 }
 
-/// POST `{text}` to the brain, return its `reply`. `None` on any transport/parse
-/// failure (caller substitutes a fallback).
-async fn fetch_brain_reply(client: &reqwest::Client, url: &str, text: &str) -> Option<String> {
+/// POST `{text, phone_number_id}` to the brain, return its `reply`. The
+/// `phone_number_id` selects the tenant universe brain-side (CO-489). `None` on
+/// any transport/parse failure (caller substitutes a fallback).
+async fn fetch_brain_reply(
+    client: &reqwest::Client,
+    url: &str,
+    text: &str,
+    phone_number_id: &str,
+) -> Option<String> {
     let resp = client
         .post(url)
-        .json(&serde_json::json!({ "text": text, "sender": "whatsapp" }))
+        .json(&serde_json::json!({
+            "text": text,
+            "sender": "whatsapp",
+            "phone_number_id": phone_number_id,
+        }))
         .send()
         .await
         .ok()?;
@@ -167,6 +181,8 @@ pub fn verify_signature(app_secret: &str, body: &[u8], header: &str) -> bool {
 pub struct InboundMsg {
     pub from: String,
     pub text: String,
+    /// Which business number was messaged — selects the tenant brain-side (CO-489).
+    pub phone_number_id: String,
 }
 
 /// Extract text messages from a Cloud API webhook body. Status-only callbacks
@@ -180,8 +196,15 @@ pub fn parse_inbound(body: &[u8]) -> Vec<InboundMsg> {
     for entry in entries.into_iter().flatten() {
         let changes = entry.get("changes").and_then(|c| c.as_array());
         for change in changes.into_iter().flatten() {
-            let msgs = change
-                .get("value")
+            let value = change.get("value");
+            // CO-489: the business number id lives once per change, in metadata.
+            let phone_number_id = value
+                .and_then(|val| val.get("metadata"))
+                .and_then(|md| md.get("phone_number_id"))
+                .and_then(|p| p.as_str())
+                .unwrap_or_default()
+                .to_string();
+            let msgs = value
                 .and_then(|val| val.get("messages"))
                 .and_then(|m| m.as_array());
             for m in msgs.into_iter().flatten() {
@@ -197,7 +220,11 @@ pub fn parse_inbound(body: &[u8]) -> Vec<InboundMsg> {
                     .unwrap_or_default()
                     .to_string();
                 if !from.is_empty() && !text.is_empty() {
-                    out.push(InboundMsg { from, text });
+                    out.push(InboundMsg {
+                        from,
+                        text,
+                        phone_number_id: phone_number_id.clone(),
+                    });
                 }
             }
         }
@@ -212,18 +239,32 @@ mod tests {
     fn sample_payload() -> &'static [u8] {
         // Raw STRING (not byte string) so the UTF-8 accent is allowed.
         r#"{"object":"whatsapp_business_account","entry":[{"id":"WABA","changes":[
-          {"value":{"messaging_product":"whatsapp","messages":[
+          {"value":{"messaging_product":"whatsapp",
+            "metadata":{"display_phone_number":"5541999999999","phone_number_id":"1238594552665575"},
+            "messages":[
             {"from":"5541999999999","id":"wamid.X","type":"text","text":{"body":"qual minha próxima tarefa?"}}
           ]},"field":"messages"}]}]}"#
             .as_bytes()
     }
 
     #[test]
-    fn parse_inbound_extracts_from_and_text() {
+    fn parse_inbound_extracts_from_text_and_phone_number_id() {
         let msgs = parse_inbound(sample_payload());
         assert_eq!(msgs.len(), 1);
         assert_eq!(msgs[0].from, "5541999999999");
         assert_eq!(msgs[0].text, "qual minha próxima tarefa?");
+        // CO-489: the tenant key rides through to the brain.
+        assert_eq!(msgs[0].phone_number_id, "1238594552665575");
+    }
+
+    #[test]
+    fn parse_inbound_tolerates_missing_metadata() {
+        let no_meta = r#"{"entry":[{"changes":[{"value":{"messages":[
+            {"from":"55","type":"text","text":{"body":"oi"}}]}}]}]}"#
+            .as_bytes();
+        let msgs = parse_inbound(no_meta);
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0].phone_number_id, ""); // empty → brain falls back to default
     }
 
     #[test]

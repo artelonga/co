@@ -25,6 +25,11 @@ use crate::server::AppState;
 #[derive(Deserialize)]
 struct ChatReq {
     text: String,
+    /// CO-489: optional tenant universe, forwarded to the brain so the companion
+    /// app routes to the same multi-tenant brain as WhatsApp. Backward-compatible
+    /// — omitting it falls back to the brain's default universe.
+    #[serde(default)]
+    universe: Option<String>,
 }
 
 pub fn router(state: AppState) -> Router<AppState> {
@@ -46,12 +51,12 @@ async fn chat_handler(Json(req): Json<ChatReq>) -> Response {
         )
             .into_response();
     }
+    let mut payload = json!({ "text": text, "sender": "app" });
+    if let Some(u) = req.universe.as_deref().filter(|u| !u.is_empty()) {
+        payload["universe"] = json!(u);
+    }
     let client = reqwest::Client::new();
-    let resp = client
-        .post(brain_url())
-        .json(&json!({ "text": text, "sender": "app" }))
-        .send()
-        .await;
+    let resp = client.post(brain_url()).json(&payload).send().await;
     match resp {
         Ok(r) if r.status().is_success() => {
             let body = r.bytes().await.unwrap_or_default();
