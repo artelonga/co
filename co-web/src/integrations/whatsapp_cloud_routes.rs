@@ -21,6 +21,8 @@
 //! right tenant universe (the brain maps `phone_number_id → universe`).
 
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use axum::{
     Json, Router,
@@ -31,9 +33,95 @@ use axum::{
     routing::{get, post},
 };
 use serde::Deserialize;
+use tokio::sync::Semaphore;
 
 use crate::error::AppError;
 use crate::server::AppState;
+
+// ---------------------------------------------------------------------------
+// CO-489 — tier-2 scalability hardening of the inbound reply path
+// ---------------------------------------------------------------------------
+
+/// Bound on every outbound hop made while answering an inbound message (the
+/// brain call AND the Cloud API send). A normal brain reply is a few seconds;
+/// 30s leaves head-room for a slow model while still capping a hung hop so a
+/// stuck task can never leak forever (the old `Client::new()` had NO timeout).
+const REPLY_HTTP_TIMEOUT_SECS: u64 = 30;
+
+/// Default process-wide cap on concurrent inbound replies (brain hops). The
+/// brain fronts a single local model, so unbounded `spawn`-per-message would
+/// pile work up without limit; this bounds it. Override with
+/// `CO_WHATSAPP_REPLY_CONCURRENCY`.
+const DEFAULT_REPLY_CONCURRENCY: usize = 4;
+
+/// How long a processed `wamid` stays in the in-memory seen-set. Meta delivers
+/// at-least-once and retries for a bounded window; 5 minutes covers the retry
+/// window so a redelivery doesn't re-run the brain and double-send.
+const WAMID_TTL: Duration = Duration::from_secs(300);
+
+/// ONE shared, timed [`reqwest::Client`] for the whole inbound/bot reply path,
+/// reused across messages so connections are pooled and every hop is bounded by
+/// [`REPLY_HTTP_TIMEOUT_SECS`]. Built once (mirrors `webhook_worker`'s timed
+/// client); reused for the brain hop, the Cloud API send, and `bot_proxy`.
+pub fn shared_client() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .timeout(Duration::from_secs(REPLY_HTTP_TIMEOUT_SECS))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new())
+    })
+}
+
+/// Parse the reply-concurrency cap from the env value, falling back to
+/// [`DEFAULT_REPLY_CONCURRENCY`] when unset, empty, non-numeric, or zero. Pure →
+/// unit-testable.
+pub fn parse_reply_concurrency(raw: Option<String>) -> usize {
+    raw.and_then(|s| s.trim().parse::<usize>().ok())
+        .filter(|&n| n > 0)
+        .unwrap_or(DEFAULT_REPLY_CONCURRENCY)
+}
+
+/// Process-wide semaphore bounding concurrent inbound replies. Sized once from
+/// `CO_WHATSAPP_REPLY_CONCURRENCY` (default [`DEFAULT_REPLY_CONCURRENCY`]).
+fn reply_semaphore() -> Arc<Semaphore> {
+    static SEM: OnceLock<Arc<Semaphore>> = OnceLock::new();
+    SEM.get_or_init(|| {
+        let n = parse_reply_concurrency(
+            crate::infra::secrets::global().get("CO_WHATSAPP_REPLY_CONCURRENCY"),
+        );
+        Arc::new(Semaphore::new(n))
+    })
+    .clone()
+}
+
+/// Pure idempotency decision (CO-489). Prunes entries older than `ttl`, then
+/// returns `true` if `wamid` is first-seen — recording it at `now` — or `false`
+/// if it was already seen within `ttl`. Takes the map by `&mut` so it is
+/// testable without any global state or a running server.
+pub fn dedup_decision(
+    seen: &mut HashMap<String, Instant>,
+    wamid: &str,
+    now: Instant,
+    ttl: Duration,
+) -> bool {
+    seen.retain(|_, t| now.duration_since(*t) < ttl);
+    if seen.contains_key(wamid) {
+        return false;
+    }
+    seen.insert(wamid.to_string(), now);
+    true
+}
+
+/// Record `wamid` in the process-wide short-TTL seen-set and report whether it
+/// should be dispatched to the brain (first-seen → `true`; a Meta redelivery
+/// within [`WAMID_TTL`] → `false`). Thin lock around [`dedup_decision`].
+fn mark_and_check_wamid(wamid: &str) -> bool {
+    static SEEN: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
+    let seen = SEEN.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut guard = seen.lock().unwrap_or_else(|e| e.into_inner());
+    dedup_decision(&mut guard, wamid, Instant::now(), WAMID_TTL)
+}
 
 pub fn router() -> Router<AppState> {
     Router::new().route("/whatsapp/webhook", get(verify_handler).post(event_handler))
@@ -101,17 +189,28 @@ async fn event_handler(headers: HeaderMap, body: Bytes) -> Response {
         return StatusCode::UNAUTHORIZED.into_response();
     }
 
-    let msgs = parse_inbound(&body);
-    if !msgs.is_empty() {
-        // CO-480: reply ASYNCHRONOUSLY. Meta requires a fast 200 (it retries on
-        // delay), and the brain/model call takes seconds — so never block the ack
-        // on it. Spawn the reply loop and return 200 immediately.
+    // CO-480: reply ASYNCHRONOUSLY. Meta requires a fast 200 (it retries on
+    // delay), and the brain/model call takes seconds — so never block the ack on
+    // it. Spawning returns immediately, so the 200 below is still fast.
+    for m in parse_inbound(&body) {
+        // CO-489 idempotency: Meta is at-least-once and retries; a redelivery of
+        // the same `wamid` must NOT re-run the brain and double-send. Skip any
+        // wamid already processed within WAMID_TTL.
+        if !m.wamid.is_empty() && !mark_and_check_wamid(&m.wamid) {
+            tracing::info!(wamid = %m.wamid, "WhatsApp Cloud inbound: duplicate wamid, skipping");
+            continue;
+        }
+        tracing::info!(from = %m.from, "WhatsApp Cloud inbound: {}", m.text);
+
+        // CO-489 bounded concurrency: acquire a process-wide permit before the
+        // brain hop so bursts/redeliveries fronting the single local model can't
+        // pile up unbounded tasks. The task still runs (Meta already got its 200);
+        // it just waits its turn, capping in-flight brain hops.
+        let sem = reply_semaphore();
         tokio::spawn(async move {
-            for m in msgs {
-                tracing::info!(from = %m.from, "WhatsApp Cloud inbound: {}", m.text);
-                if let Err(e) = reply_to(&m).await {
-                    tracing::warn!(from = %m.from, "WhatsApp Cloud reply failed: {e}");
-                }
+            let _permit = sem.acquire_owned().await;
+            if let Err(e) = reply_to(&m).await {
+                tracing::warn!(from = %m.from, "WhatsApp Cloud reply failed: {e}");
             }
         });
     }
@@ -136,11 +235,12 @@ async fn reply_to(msg: &InboundMsg) -> Result<(), String> {
     use crate::notification_providers::{ChannelProvider, CloudApiProvider};
     let provider = CloudApiProvider::from_env()
         .ok_or("CloudApiProvider not configured (WHATSAPP_CLOUD_TOKEN/PHONE_NUMBER_ID)")?;
-    let client = reqwest::Client::new();
-    let reply = fetch_brain_reply(&client, &brain_url(), &msg.text, &msg.phone_number_id)
+    // CO-489: ONE shared, timed client for both the brain hop and the Cloud send.
+    let client = shared_client();
+    let reply = fetch_brain_reply(client, &brain_url(), &msg.text, &msg.phone_number_id)
         .await
         .unwrap_or_else(|| "Recebi sua mensagem — já te respondo! 🙂".to_string());
-    provider.send(&client, &msg.from, &reply).await
+    provider.send(client, &msg.from, &reply).await
 }
 
 /// POST `{text, phone_number_id}` to the brain, return its `reply`. The
@@ -200,6 +300,10 @@ pub struct InboundMsg {
     pub text: String,
     /// Which business number was messaged — selects the tenant brain-side (CO-489).
     pub phone_number_id: String,
+    /// Meta's message id (`wamid.*`). Used to dedup at-least-once redeliveries so
+    /// the brain isn't re-run and the user double-replied (CO-489). May be empty
+    /// for a payload that omits it (then dedup is skipped for that message).
+    pub wamid: String,
 }
 
 /// Extract text messages from a Cloud API webhook body. Status-only callbacks
@@ -236,11 +340,18 @@ pub fn parse_inbound(body: &[u8]) -> Vec<InboundMsg> {
                     .and_then(|b| b.as_str())
                     .unwrap_or_default()
                     .to_string();
+                // CO-489: carry the message id for at-least-once dedup.
+                let wamid = m
+                    .get("id")
+                    .and_then(|i| i.as_str())
+                    .unwrap_or_default()
+                    .to_string();
                 if !from.is_empty() && !text.is_empty() {
                     out.push(InboundMsg {
                         from,
                         text,
                         phone_number_id: phone_number_id.clone(),
+                        wamid,
                     });
                 }
             }
@@ -381,10 +492,10 @@ pub async fn link_start_handler(
         })?;
 
     let code = compute_otp(&otp_secret(), &user_id.0, &digits, otp_bucket(now_unix()));
-    let client = reqwest::Client::new();
+    let client = shared_client();
     let body = format!("Seu código de verificação CO: {code}");
     use crate::notification_providers::ChannelProvider;
-    provider.send(&client, &digits, &body).await.map_err(|e| {
+    provider.send(client, &digits, &body).await.map_err(|e| {
         AppError::ServiceUnavailable(format!("failed to send verification code: {e}"))
     })?;
 
@@ -570,6 +681,8 @@ mod tests {
         assert_eq!(msgs[0].text, "qual minha próxima tarefa?");
         // CO-489: the tenant key rides through to the brain.
         assert_eq!(msgs[0].phone_number_id, "1238594552665575");
+        // CO-489: the wamid is carried for at-least-once dedup.
+        assert_eq!(msgs[0].wamid, "wamid.X");
     }
 
     #[test]
@@ -580,6 +693,68 @@ mod tests {
         let msgs = parse_inbound(no_meta);
         assert_eq!(msgs.len(), 1);
         assert_eq!(msgs[0].phone_number_id, ""); // empty → brain falls back to default
+        assert_eq!(msgs[0].wamid, ""); // no id → dedup skipped for this message
+    }
+
+    // --- CO-489: tier-2 scalability hardening -------------------------------
+
+    #[test]
+    fn dedup_first_seen_then_repeat_then_expired() {
+        let ttl = Duration::from_secs(300);
+        let t0 = Instant::now();
+        let mut seen = HashMap::new();
+
+        // First sighting → dispatch.
+        assert!(dedup_decision(&mut seen, "wamid.A", t0, ttl));
+        // Repeat within the TTL window → skip (Meta redelivery).
+        assert!(!dedup_decision(
+            &mut seen,
+            "wamid.A",
+            t0 + Duration::from_secs(60),
+            ttl
+        ));
+        // A DIFFERENT wamid in the same window still dispatches.
+        assert!(dedup_decision(
+            &mut seen,
+            "wamid.B",
+            t0 + Duration::from_secs(61),
+            ttl
+        ));
+        // Past the TTL the old entry is pruned, so the same wamid dispatches again.
+        assert!(dedup_decision(
+            &mut seen,
+            "wamid.A",
+            t0 + Duration::from_secs(360),
+            ttl
+        ));
+    }
+
+    #[test]
+    fn reply_concurrency_parses_from_env_with_default() {
+        // Unset → default.
+        assert_eq!(parse_reply_concurrency(None), DEFAULT_REPLY_CONCURRENCY);
+        // Valid numeric override (trimmed).
+        assert_eq!(parse_reply_concurrency(Some("8".into())), 8);
+        assert_eq!(parse_reply_concurrency(Some("  6 ".into())), 6);
+        // Invalid / empty / zero → default (never an unbounded 0-permit semaphore).
+        assert_eq!(
+            parse_reply_concurrency(Some(String::new())),
+            DEFAULT_REPLY_CONCURRENCY
+        );
+        assert_eq!(
+            parse_reply_concurrency(Some("abc".into())),
+            DEFAULT_REPLY_CONCURRENCY
+        );
+        assert_eq!(
+            parse_reply_concurrency(Some("0".into())),
+            DEFAULT_REPLY_CONCURRENCY
+        );
+    }
+
+    #[test]
+    fn shared_client_is_built_once() {
+        // The OnceLock hands back the SAME instance every call (pooled + timed).
+        assert!(std::ptr::eq(shared_client(), shared_client()));
     }
 
     #[test]

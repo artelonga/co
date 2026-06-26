@@ -68,7 +68,9 @@ async fn chat_handler(user_id: crate::auth::UserId, Json(req): Json<ChatReq>) ->
     if let Some(u) = req.universe.as_deref().filter(|u| !u.is_empty()) {
         payload["universe"] = json!(u);
     }
-    let client = reqwest::Client::new();
+    // CO-489: reuse the ONE shared, timed client (no per-request `Client::new()`
+    // — that had no timeout, so a stuck brain hop leaked the task forever).
+    let client = crate::whatsapp_cloud_routes::shared_client();
     let mut builder = client.post(brain_url()).json(&payload);
     // CO-490 (#5): authenticate co-web → bot over loopback when configured.
     if let Some((name, value)) =
