@@ -23,18 +23,33 @@
 use std::collections::HashMap;
 
 use axum::{
-    Router,
+    Json, Router,
     body::Bytes,
-    extract::Query,
+    extract::{Query, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
-    routing::get,
+    routing::{get, post},
 };
+use serde::Deserialize;
 
+use crate::error::AppError;
 use crate::server::AppState;
 
 pub fn router() -> Router<AppState> {
     Router::new().route("/whatsapp/webhook", get(verify_handler).post(event_handler))
+}
+
+/// CO-490: authenticated companion-app endpoints. Mounted separately from
+/// [`router`] (the Meta webhook) because these routes MUST sit behind the
+/// `require_auth` gate, whereas the webhook is Meta-HMAC-verified and ungated.
+///
+/// Two-step proof-of-possession flow (CO-490 #3):
+/// - `POST /whatsapp/link/start`  — send a stateless OTP to the number.
+/// - `POST /whatsapp/link/verify` — verify the OTP, then link + mint the token.
+pub fn link_router() -> Router<AppState> {
+    Router::new()
+        .route("/whatsapp/link/start", post(link_start_handler))
+        .route("/whatsapp/link/verify", post(link_verify_handler))
 }
 
 // ---------------------------------------------------------------------------
@@ -137,16 +152,18 @@ async fn fetch_brain_reply(
     text: &str,
     phone_number_id: &str,
 ) -> Option<String> {
-    let resp = client
-        .post(url)
-        .json(&serde_json::json!({
-            "text": text,
-            "sender": "whatsapp",
-            "phone_number_id": phone_number_id,
-        }))
-        .send()
-        .await
-        .ok()?;
+    let mut builder = client.post(url).json(&serde_json::json!({
+        "text": text,
+        "sender": "whatsapp",
+        "phone_number_id": phone_number_id,
+    }));
+    // CO-490 (#5): authenticate co-web → bot over loopback when configured.
+    if let Some((name, value)) = crate::bot_proxy_routes::brain_auth_header(
+        crate::infra::secrets::global().get("CO_BOT_SHARED_SECRET"),
+    ) {
+        builder = builder.header(name, value);
+    }
+    let resp = builder.send().await.ok()?;
     if !resp.status().is_success() {
         return None;
     }
@@ -232,6 +249,304 @@ pub fn parse_inbound(body: &[u8]) -> Vec<InboundMsg> {
     out
 }
 
+// ---------------------------------------------------------------------------
+// CO-490 — companion-app account link (authenticated) → bot identity ingest
+// ---------------------------------------------------------------------------
+
+/// Default identity-ingest URL when `CO_BOT_IDENTITY_URL` is unset. Loopback
+/// only: the bot runs as a sidecar, never reachable off-box.
+const DEFAULT_IDENTITY_URL: &str = "http://127.0.0.1:8765/identity";
+
+/// Name stamped on the API token minted for the bot. Lets the user recognise
+/// (and revoke) the bot's token in their token list.
+const LINK_TOKEN_NAME: &str = "whatsapp-bot";
+
+/// CO-490 (#2): the MINIMUM capability set the bot token carries. The bot only
+/// reads/writes the user's content entries and reads which universes the user
+/// has — nothing more. Explicitly excludes `universes:write` (the bot never
+/// creates/edits universes), every admin-surface capability (`gestao:read`,
+/// `funnel:read`, `chat:*`, `deployments:read`), and `agent:dispatch`. There is
+/// no token-management capability in the vocabulary, so a leaked bot token can
+/// never mint or revoke tokens. A leaked secret then grants only this set, never
+/// owner-tier authority.
+fn bot_token_scopes() -> std::collections::BTreeSet<String> {
+    crate::auth::capabilities::resolve_scopes(&[
+        "entries:read".to_string(),
+        "entries:write".to_string(),
+        "universes:read".to_string(),
+    ])
+    .expect("static bot scope set is valid")
+}
+
+/// OTP rotation period in seconds (CO-490 #3): a code is valid for the current
+/// 300s bucket and the immediately preceding one (so a code minted near a bucket
+/// boundary still verifies for up to ~5 more minutes).
+const OTP_PERIOD_SECS: u64 = 300;
+
+#[derive(Debug, Deserialize)]
+pub struct LinkStartRequest {
+    pub whatsapp: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct LinkVerifyRequest {
+    pub whatsapp: String,
+    pub code: String,
+}
+
+/// Current unix time in seconds (0 if the clock is before the epoch — never).
+fn now_unix() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// The OTP HMAC secret: `CO_WHATSAPP_OTP_SECRET` when set/non-empty, else the
+/// `JWT_SECRET` (already required in prod). Never returns an empty string in a
+/// configured deployment.
+fn otp_secret() -> String {
+    crate::infra::secrets::global()
+        .get("CO_WHATSAPP_OTP_SECRET")
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(crate::auth::jwt_secret)
+}
+
+/// CO-490 (#3): the 300s time bucket for `unix_secs`. The OTP is a pure function
+/// of `(user_id, digits, bucket)` so no server-side state is stored.
+pub fn otp_bucket(unix_secs: u64) -> u64 {
+    unix_secs / OTP_PERIOD_SECS
+}
+
+/// Number of decimal digits in the OTP (CO-490 R3: widened 6→8 to harden against
+/// brute force — 10^8 keyspace within the 5-minute window instead of 10^6).
+const OTP_DIGITS: usize = 8;
+
+/// Extract the first [`OTP_DIGITS`] decimal digits (`0`–`9`) of a hex string. A
+/// 64-char SHA-256 hex digest contains ~40 decimal digits on average, so this
+/// never short-pads in practice; the `0` pad is a belt-and-suspenders fallback
+/// for a pathological all-letters digest. Pure → unit-testable.
+fn first_n_decimal_digits(hex: &str) -> String {
+    let mut digits: String = hex
+        .chars()
+        .filter(char::is_ascii_digit)
+        .take(OTP_DIGITS)
+        .collect();
+    while digits.len() < OTP_DIGITS {
+        digits.push('0');
+    }
+    digits
+}
+
+/// Compute the stateless 8-digit OTP = first [`OTP_DIGITS`] decimal digits of
+/// `HMAC-SHA256(secret, "<user_id>|<digits>|<bucket>")`. Pure → unit-testable.
+pub fn compute_otp(secret: &str, user_id: &str, digits: &str, bucket: u64) -> String {
+    let msg = format!("{user_id}|{digits}|{bucket}");
+    let hex = crate::billing::hmac_sha256_hex(secret, msg.as_bytes());
+    first_n_decimal_digits(&hex)
+}
+
+/// CO-490 (#3): does `code` match the OTP for the current OR previous 300s
+/// bucket? Constant-time compare (no early-exit timing leak). Pure → testable.
+pub fn otp_matches(secret: &str, user_id: &str, digits: &str, code: &str, now_secs: u64) -> bool {
+    let bucket = otp_bucket(now_secs);
+    let candidates = [bucket, bucket.saturating_sub(1)];
+    let mut ok = false;
+    for b in candidates {
+        let expected = compute_otp(secret, user_id, digits, b);
+        // Fold every candidate into one constant-time pass (no early return).
+        ok |= crate::billing::constant_time_eq(expected.as_bytes(), code.as_bytes());
+    }
+    ok
+}
+
+/// POST `/api/v1/whatsapp/link/start` — send a proof-of-possession OTP to the
+/// number. Authenticated; the OTP binds the *caller's own* `user_id`, so a code
+/// minted for one user can never verify another. The code is sent via the
+/// official WhatsApp Cloud API (so the user must control the number) and is
+/// **never** returned in the HTTP response.
+pub async fn link_start_handler(
+    user_id: crate::auth::UserId,
+    Json(req): Json<LinkStartRequest>,
+) -> Result<impl IntoResponse, AppError> {
+    let digits = validate_whatsapp(&req.whatsapp)?;
+
+    // Proof-of-possession requires an outbound channel; without it we cannot
+    // prove the caller controls the number, so refuse rather than link blindly.
+    let provider =
+        crate::notification_providers::CloudApiProvider::from_env().ok_or_else(|| {
+            AppError::ServiceUnavailable(
+                "WhatsApp Cloud API not configured (cannot send verification code)".into(),
+            )
+        })?;
+
+    let code = compute_otp(&otp_secret(), &user_id.0, &digits, otp_bucket(now_unix()));
+    let client = reqwest::Client::new();
+    let body = format!("Seu código de verificação CO: {code}");
+    use crate::notification_providers::ChannelProvider;
+    provider.send(&client, &digits, &body).await.map_err(|e| {
+        AppError::ServiceUnavailable(format!("failed to send verification code: {e}"))
+    })?;
+
+    // Never echo the code.
+    Ok(Json(serde_json::json!({ "sent": true })))
+}
+
+/// POST `/api/v1/whatsapp/link/verify` — verify the OTP, then link + mint.
+///
+/// Security: every write is scoped to `user_id.0` — the id resolved by the
+/// `require_auth`/`UserId` extractor from the caller's own session/token. On a
+/// valid code we (a) reject if the number is already linked to a *different*
+/// user (`409`), (b) set the caller's own `users.whatsapp`, (c) revoke the
+/// caller's prior `whatsapp-bot` tokens, (d) mint a least-privilege scoped token
+/// (#2), and (e) best-effort push `{whatsapp, token, user_id}` to the bot over
+/// loopback. The minted token is **never** echoed in the HTTP response.
+pub async fn link_verify_handler(
+    State(state): State<AppState>,
+    user_id: crate::auth::UserId,
+    Json(req): Json<LinkVerifyRequest>,
+) -> Result<impl IntoResponse, AppError> {
+    let digits = validate_whatsapp(&req.whatsapp)?;
+    let code = req.code.trim();
+
+    // Proof of possession: the caller must echo the code we sent to the number.
+    if !otp_matches(&otp_secret(), &user_id.0, &digits, code, now_unix()) {
+        return Err(AppError::Unauthorized("invalid or expired code".into()));
+    }
+
+    // (a) uniqueness, (b) set number, (c) revoke prior bot tokens, (d) mint the
+    // scoped token — all under one lock; the lock drops before any network I/O.
+    let token = {
+        let storage = crate::server::state::lock_storage(&state);
+
+        // (a) one-number-per-account: reject if another user already owns it.
+        if let Some(other) = storage.get_user_id_by_whatsapp(&digits)
+            && other != user_id.0
+        {
+            return Err(AppError::Conflict(
+                "this WhatsApp number is already linked to another account".into(),
+            ));
+        }
+
+        // (b) set the caller's own number (digit-normalized → stable for the
+        //     uniqueness compare above).
+        storage
+            .set_user_whatsapp(&user_id.0, &digits)
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        // (c) #6: revoke prior `whatsapp-bot` tokens before minting a fresh one.
+        storage
+            .delete_api_tokens_by_name(&user_id.0, LINK_TOKEN_NAME)
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        // (d) #2: mint a LEAST-PRIVILEGE scoped token (not owner-tier).
+        let tok = storage
+            .create_api_token_with_scopes(&user_id.0, LINK_TOKEN_NAME, &bot_token_scopes())
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+        tok.token.unwrap_or_default()
+    };
+
+    // (e) best-effort push {whatsapp, token, user_id} to the bot identity ingest.
+    // Skipped silently when the shared secret is unset; a transport/HTTP error is
+    // logged but NEVER fails the link (the user is already linked CO-side).
+    best_effort_identity_push(&user_id.0, &digits, &token).await;
+
+    // Token is intentionally NOT returned — it reaches the bot over loopback only.
+    Ok(Json(serde_json::json!({ "linked": true })))
+}
+
+/// Normalize + validate the inbound number to its decimal digits (strips `+`,
+/// spaces, dashes). Rejects an input with no digits. Pure → unit-testable. The
+/// digit-only form is what the OTP, uniqueness check, and `users.whatsapp` all
+/// agree on, so an inbound `+55 41 99999-9999` and a stored `5541999999999`
+/// compare equal.
+pub fn validate_whatsapp(raw: &str) -> Result<String, AppError> {
+    let digits: String = raw.chars().filter(char::is_ascii_digit).collect();
+    if digits.is_empty() {
+        return Err(AppError::BadRequest("whatsapp is required".into()));
+    }
+    Ok(digits)
+}
+
+/// A fully-built identity-ingest request: where to POST, the shared secret for
+/// the `X-Bot-Secret` header, and the JSON body. Constructed by
+/// [`build_identity_push`] so it can be asserted in tests without a live socket.
+#[derive(Debug, PartialEq)]
+pub struct IdentityPush {
+    pub url: String,
+    pub secret: String,
+    pub body: serde_json::Value,
+}
+
+/// Build the identity-ingest request from env-derived config. Returns `None`
+/// (→ skip the push, link still succeeds) when the shared secret is unset/empty,
+/// since the bot ingest rejects any push without a matching `X-Bot-Secret`. The
+/// URL falls back to [`DEFAULT_IDENTITY_URL`] when unset/empty. The body carries
+/// `{whatsapp, token, user_id}` so the bot can key identities by `user_id`
+/// (CO-490 #1/#3e). Pure → testable.
+pub fn build_identity_push(
+    url: Option<String>,
+    secret: Option<String>,
+    user_id: &str,
+    whatsapp: &str,
+    token: &str,
+) -> Option<IdentityPush> {
+    let secret = secret.filter(|s| !s.is_empty())?;
+    let url = url
+        .filter(|u| !u.is_empty())
+        .unwrap_or_else(|| DEFAULT_IDENTITY_URL.to_string());
+    Some(IdentityPush {
+        url,
+        secret,
+        body: serde_json::json!({
+            "whatsapp": whatsapp,
+            "token": token,
+            "user_id": user_id,
+        }),
+    })
+}
+
+/// Read identity-push config from env, build the request, and POST it — all
+/// best-effort: any missing secret, client-build error, or transport/HTTP error
+/// is silently skipped or logged, NEVER propagated (the link already succeeded
+/// CO-side). Kept off the storage-lock path; safe to call after the lock drops.
+async fn best_effort_identity_push(user_id: &str, whatsapp: &str, token: &str) {
+    let Some(push) = build_identity_push(
+        crate::infra::secrets::global().get("CO_BOT_IDENTITY_URL"),
+        crate::infra::secrets::global().get("CO_BOT_SHARED_SECRET"),
+        user_id,
+        whatsapp,
+        token,
+    ) else {
+        return;
+    };
+    let Ok(client) = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+    else {
+        return;
+    };
+    if let Err(e) = push_identity(&client, &push).await {
+        tracing::warn!("CO-490 bot identity push failed (link still succeeded): {e}");
+    }
+}
+
+/// POST the identity payload to the bot, with the `X-Bot-Secret` header. Returns
+/// `Err` on transport failure or any non-2xx status (caller logs and ignores).
+async fn push_identity(client: &reqwest::Client, push: &IdentityPush) -> Result<(), String> {
+    let resp = client
+        .post(&push.url)
+        .header("X-Bot-Secret", &push.secret)
+        .json(&push.body)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(format!("identity ingest returned {}", resp.status()));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -296,5 +611,225 @@ mod tests {
         assert!(!verify_signature(secret, body, "sha256=deadbeef"));
         assert!(!verify_signature(secret, body, "deadbeef")); // missing prefix
         assert!(!verify_signature("wrong-secret", body, &good));
+    }
+
+    // --- CO-490: link endpoint helpers ---------------------------------------
+
+    #[test]
+    fn validate_whatsapp_rejects_empty_and_whitespace() {
+        // The 400 path: empty / whitespace-only / no-digits → BadRequest.
+        assert!(matches!(
+            validate_whatsapp(""),
+            Err(AppError::BadRequest(_))
+        ));
+        assert!(matches!(
+            validate_whatsapp("   "),
+            Err(AppError::BadRequest(_))
+        ));
+        assert!(matches!(
+            validate_whatsapp("not-a-number"),
+            Err(AppError::BadRequest(_))
+        ));
+    }
+
+    #[test]
+    fn validate_whatsapp_normalizes_to_digits() {
+        // Trims, strips `+`/spaces/dashes → bare decimal digits.
+        assert_eq!(
+            validate_whatsapp("  5541999999999 ").unwrap(),
+            "5541999999999"
+        );
+        assert_eq!(
+            validate_whatsapp("+55 (41) 99999-9999").unwrap(),
+            "5541999999999"
+        );
+    }
+
+    // --- CO-490 #3: stateless OTP helpers ---
+
+    #[test]
+    fn first_n_decimal_digits_filters_and_pads() {
+        // Letters skipped, first eight digits kept (CO-490 R3: widened to 8).
+        assert_eq!(first_n_decimal_digits("a1b2c3d4e5f6g7h8i9"), "12345678");
+        // All-letters pathological input → padded to 8 zeros.
+        assert_eq!(first_n_decimal_digits("abcdef"), "00000000");
+    }
+
+    #[test]
+    fn otp_right_code_passes_wrong_fails() {
+        let secret = "otp-secret";
+        let now = 1_000_000u64;
+        let code = compute_otp(secret, "usr_alice", "5541999999999", otp_bucket(now));
+        // CO-490 R3: 8-digit OTP (was 6) to harden brute force.
+        assert_eq!(code.len(), 8);
+        assert!(code.chars().all(|c| c.is_ascii_digit()));
+
+        // Right code in the current bucket verifies.
+        assert!(otp_matches(
+            secret,
+            "usr_alice",
+            "5541999999999",
+            &code,
+            now
+        ));
+        // Wrong code fails.
+        assert!(!otp_matches(
+            secret,
+            "usr_alice",
+            "5541999999999",
+            "00000000",
+            now
+        ));
+        // Right code but a DIFFERENT user fails (code binds the user_id).
+        assert!(!otp_matches(secret, "usr_bob", "5541999999999", &code, now));
+        // Right code but a DIFFERENT number fails.
+        assert!(!otp_matches(
+            secret,
+            "usr_alice",
+            "5541000000000",
+            &code,
+            now
+        ));
+    }
+
+    #[test]
+    fn otp_prev_bucket_passes_but_older_expires() {
+        let secret = "otp-secret";
+        // Code minted at the start of a bucket.
+        let minted_at = 2_000 * OTP_PERIOD_SECS; // bucket boundary
+        let code = compute_otp(secret, "usr_alice", "5541999999999", otp_bucket(minted_at));
+
+        // Still inside the NEXT bucket → previous-bucket grace verifies.
+        let next_bucket = minted_at + OTP_PERIOD_SECS + 1;
+        assert!(otp_matches(
+            secret,
+            "usr_alice",
+            "5541999999999",
+            &code,
+            next_bucket
+        ));
+
+        // Two buckets later → expired (outside current + previous window).
+        let two_later = minted_at + 2 * OTP_PERIOD_SECS + 1;
+        assert!(!otp_matches(
+            secret,
+            "usr_alice",
+            "5541999999999",
+            &code,
+            two_later
+        ));
+    }
+
+    #[test]
+    fn build_identity_push_skips_when_secret_unset() {
+        // No secret → None → push is skipped, link still succeeds.
+        assert_eq!(
+            build_identity_push(
+                Some("http://x/identity".into()),
+                None,
+                "usr_alice",
+                "5541999999999",
+                "co_tok",
+            ),
+            None
+        );
+        // Empty secret is treated as unset.
+        assert_eq!(
+            build_identity_push(
+                None,
+                Some(String::new()),
+                "usr_alice",
+                "5541999999999",
+                "co_tok"
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn build_identity_push_uses_default_url_when_unset() {
+        let push = build_identity_push(
+            None,
+            Some("shh".into()),
+            "usr_alice",
+            "5541999999999",
+            "co_tok",
+        )
+        .unwrap();
+        assert_eq!(push.url, DEFAULT_IDENTITY_URL);
+        assert_eq!(push.secret, "shh");
+    }
+
+    #[test]
+    fn build_identity_push_builds_payload_and_header_secret() {
+        let push = build_identity_push(
+            Some("http://bot.local/identity".into()),
+            Some("super-secret".into()),
+            "usr_alice",
+            "5541988887777",
+            "co_abc123",
+        )
+        .unwrap();
+
+        // URL + the value that becomes the X-Bot-Secret header.
+        assert_eq!(push.url, "http://bot.local/identity");
+        assert_eq!(push.secret, "super-secret");
+        // Body carries exactly {whatsapp, token, user_id} (#1/#3e key the bot by user_id).
+        assert_eq!(push.body["whatsapp"], "5541988887777");
+        assert_eq!(push.body["token"], "co_abc123");
+        assert_eq!(push.body["user_id"], "usr_alice");
+        assert_eq!(
+            push.body.as_object().map(|o| o.len()),
+            Some(3),
+            "body must contain whatsapp + token + user_id"
+        );
+    }
+
+    #[test]
+    fn bot_token_scopes_is_least_privilege() {
+        let scopes = bot_token_scopes();
+        // Exactly the three needed: read/write entries + read universes.
+        assert!(scopes.contains("entries:read"));
+        assert!(scopes.contains("entries:write"));
+        assert!(scopes.contains("universes:read"));
+        // Never universes:write, admin surfaces, or agent dispatch.
+        assert!(!scopes.contains("universes:write"));
+        assert!(!scopes.contains("chat:read"));
+        assert!(!scopes.contains("chat:write"));
+        assert!(!scopes.contains("gestao:read"));
+        assert!(!scopes.contains("funnel:read"));
+        assert!(!scopes.contains("deployments:read"));
+        assert!(!scopes.contains("agent:dispatch"));
+        assert_eq!(scopes.len(), 3, "exactly the three least-privilege scopes");
+    }
+
+    #[test]
+    fn set_user_whatsapp_round_trips_and_is_scoped_to_caller() {
+        use crate::storage::Storage;
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut storage = Storage::new(dir.path().to_str().unwrap());
+        let alice = storage
+            .create_user("alice@example.com", "Alice")
+            .expect("create alice");
+        let bob = storage
+            .create_user("bob@example.com", "Bob")
+            .expect("create bob");
+
+        // Round-trip: setting Alice's number stores and reads back trimmed.
+        let updated = storage
+            .set_user_whatsapp(&alice.id, "  5541999990000 ")
+            .expect("set whatsapp");
+        assert_eq!(updated, 1, "exactly one row (the caller's) updated");
+        assert_eq!(
+            storage.get_user_whatsapp(&alice.id).as_deref(),
+            Some("5541999990000")
+        );
+
+        // Scope: Bob is untouched by Alice's link.
+        assert_eq!(storage.get_user_whatsapp(&bob.id), None);
+
+        // Empty input is rejected at the storage layer too (defense in depth).
+        assert!(storage.set_user_whatsapp(&alice.id, "   ").is_err());
     }
 }

@@ -277,6 +277,17 @@ impl Storage {
         Ok(n > 0)
     }
 
+    /// CO-490 (#6): revoke every token a user holds under the given `name`.
+    /// Returns the count deleted. Used to rotate the `whatsapp-bot` token on
+    /// re-link so an old (possibly leaked) bot secret never outlives a re-link.
+    pub fn delete_api_tokens_by_name(&self, user_id: &str, name: &str) -> anyhow::Result<usize> {
+        let n = self.conn.execute(
+            "DELETE FROM api_tokens WHERE user_id = ?1 AND name = ?2",
+            params![user_id, name],
+        )?;
+        Ok(n)
+    }
+
     /// Look up a token by value; check expiry. Updates `last_used_at`.
     /// The incoming raw token is hashed with SHA-256 before the DB lookup —
     /// no plaintext token is ever compared directly against stored data.

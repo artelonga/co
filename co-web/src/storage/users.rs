@@ -230,6 +230,56 @@ impl Storage {
         Ok(true)
     }
 
+    /// CO-490: set the caller's WhatsApp number (`users.whatsapp`, added in
+    /// migration v093) so the WhatsApp bot can resolve an inbound sender number
+    /// back to this account. Always scoped to a single `user_id` — the caller's
+    /// own id — never another user's. The value is stored trimmed; an
+    /// already-trimmed-empty value is rejected by the route layer before this is
+    /// called. Returns the number of rows updated (`1` on success, `0` if the
+    /// user id does not exist).
+    pub fn set_user_whatsapp(&self, user_id: &str, whatsapp: &str) -> anyhow::Result<usize> {
+        let normalized = whatsapp.trim();
+        if normalized.is_empty() {
+            return Err(anyhow::anyhow!("whatsapp cannot be empty"));
+        }
+        let updated = self.conn.execute(
+            "UPDATE users SET whatsapp = ?1 WHERE id = ?2",
+            params![normalized, user_id],
+        )?;
+        Ok(updated)
+    }
+
+    /// CO-490: read the stored WhatsApp number for a user (`None` when unset).
+    pub fn get_user_whatsapp(&self, user_id: &str) -> Option<String> {
+        self.conn
+            .query_row(
+                "SELECT whatsapp FROM users WHERE id = ?1",
+                params![user_id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .ok()
+            .flatten()
+    }
+
+    /// CO-490 (#3a uniqueness): find the user id that currently owns a given
+    /// WhatsApp number, or `None`. The number is compared trimmed against the
+    /// stored value (callers pass the digit-normalized form so the compare is
+    /// apples-to-apples). Used to enforce one-number-per-account at link/verify:
+    /// if the match is a *different* user the link is rejected with `409`.
+    pub fn get_user_id_by_whatsapp(&self, whatsapp: &str) -> Option<String> {
+        let normalized = whatsapp.trim();
+        if normalized.is_empty() {
+            return None;
+        }
+        self.conn
+            .query_row(
+                "SELECT id FROM users WHERE whatsapp = ?1",
+                params![normalized],
+                |row| row.get::<_, String>(0),
+            )
+            .ok()
+    }
+
     // --- UAT-specific methods (CO-44) ---
 
     /// Get user by email along with their stored Argon2 password hash.
