@@ -655,6 +655,9 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             // CO-499: read-only lead-temperature digest (output B). Self-gates
             // via `Scoped<TelemetryRead>` (telemetry:read), so no auth layer here.
             .nest("/api/v1", crate::lead_digest::router())
+            // CO-491: deterministic, versioned WhatsApp consent text. Public
+            // (it *is* the consent copy); the bot displays it verbatim.
+            .nest("/api/v1", crate::whatsapp_consent::router())
             .nest("/api/v1", crate::search_routes::router())
             .nest(
                 "/api/v1/auth/recovery",

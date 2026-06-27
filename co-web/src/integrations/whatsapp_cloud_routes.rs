@@ -503,8 +503,20 @@ pub async fn link_start_handler(
         AppError::ServiceUnavailable(format!("failed to send verification code: {e}"))
     })?;
 
+    // CO-491: surface the consent version the user is being asked to agree to, so
+    // the agreed version is known/auditable end-to-end (the link prompt shows the
+    // versioned `agreement` text; the user agrees by completing the OTP verify).
+    let consent_version = super::whatsapp_consent::consent_version();
+    tracing::info!(
+        user_id = %user_id.0,
+        consent_version = %consent_version,
+        "whatsapp link/start: presenting consent version"
+    );
+
     // Never echo the code.
-    Ok(Json(serde_json::json!({ "sent": true })))
+    Ok(Json(
+        serde_json::json!({ "sent": true, "consent_version": consent_version }),
+    ))
 }
 
 /// POST `/api/v1/whatsapp/link/verify` — verify the OTP, then link + mint.
@@ -566,8 +578,21 @@ pub async fn link_verify_handler(
     // logged but NEVER fails the link (the user is already linked CO-side).
     best_effort_identity_push(&user_id.0, &digits, &token).await;
 
+    // CO-491: log the consent version the user agreed to (LGPD demonstrabilidade).
+    // Durable per-user persistence of the agreed version needs a schema column =
+    // a coordinated migration (NOT added here; tracked in CHANGELOG-PENDING) — for
+    // now the agreed version is auditable via this log + the response field.
+    let consent_version = super::whatsapp_consent::consent_version();
+    tracing::info!(
+        user_id = %user_id.0,
+        consent_version = %consent_version,
+        "whatsapp link/verify: user agreed to consent version"
+    );
+
     // Token is intentionally NOT returned — it reaches the bot over loopback only.
-    Ok(Json(serde_json::json!({ "linked": true })))
+    Ok(Json(
+        serde_json::json!({ "linked": true, "consent_version": consent_version }),
+    ))
 }
 
 /// Normalize + validate the inbound number to its decimal digits (strips `+`,
