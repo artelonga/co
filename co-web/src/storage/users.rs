@@ -261,6 +261,48 @@ impl Storage {
             .flatten()
     }
 
+    /// CO-491: durably record the versioned consent a user agreed to at link
+    /// time (`users.whatsapp_consent_version/_at/_sha`, added in migration v094) —
+    /// the LGPD demonstrabilidade record (Art. 8º §2º). Always scoped to a single
+    /// `user_id` (the caller's own). `version` is the document version string,
+    /// `at` an RFC 3339 timestamp, `sha` the sha256 (hex) of the rendered
+    /// agreement text. Returns the number of rows updated (`1` on success, `0` if
+    /// the user id does not exist).
+    pub fn set_whatsapp_consent(
+        &self,
+        user_id: &str,
+        version: &str,
+        at: &str,
+        sha: &str,
+    ) -> anyhow::Result<usize> {
+        let updated = self.conn.execute(
+            "UPDATE users SET whatsapp_consent_version = ?1, whatsapp_consent_at = ?2, \
+             whatsapp_consent_sha = ?3 WHERE id = ?4",
+            params![version, at, sha, user_id],
+        )?;
+        Ok(updated)
+    }
+
+    /// CO-491: read the recorded consent `(version, at, sha)` for a user, or
+    /// `None` when no consent has been recorded (any column NULL ⇒ never linked).
+    pub fn get_whatsapp_consent(&self, user_id: &str) -> Option<(String, String, String)> {
+        self.conn
+            .query_row(
+                "SELECT whatsapp_consent_version, whatsapp_consent_at, whatsapp_consent_sha \
+                 FROM users WHERE id = ?1",
+                params![user_id],
+                |row| {
+                    Ok((
+                        row.get::<_, Option<String>>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                    ))
+                },
+            )
+            .ok()
+            .and_then(|(v, a, s)| Some((v?, a?, s?)))
+    }
+
     /// CO-490 (#3a uniqueness): find the user id that currently owns a given
     /// WhatsApp number, or `None`. The number is compared trimmed against the
     /// stored value (callers pass the digit-normalized form so the compare is

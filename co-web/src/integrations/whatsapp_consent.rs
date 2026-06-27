@@ -78,6 +78,25 @@ pub fn consent_version() -> &'static str {
     &doc().version
 }
 
+/// Alias for [`consent_version`] used by the durable consent-persistence path
+/// (CO-491): the version string recorded against the user at link time.
+pub fn current_version() -> &'static str {
+    consent_version()
+}
+
+/// CO-491: sha256 (hex) of the rendered `agreement` text for `operator`. The
+/// agreement is the substantive consent copy the user is shown and agrees to, so
+/// hashing exactly what was rendered gives a verifiable fingerprint of the agreed
+/// wording (LGPD demonstrabilidade) — reproducible even if a published version
+/// file were ever (incorrectly) edited in place. Plain sha256 (no key); the
+/// `sha2` crate is already a workspace dependency.
+pub fn agreement_sha(operator: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let agreement = render(operator).agreement;
+    let hash = Sha256::digest(agreement.as_bytes());
+    hash.iter().map(|b| format!("{b:02x}")).collect()
+}
+
 /// Substitute the single allowed placeholder, `{operator}`. No other interpolation.
 fn sub(s: &str, operator: &str) -> String {
     s.replace("{operator}", operator)
@@ -185,6 +204,30 @@ mod tests {
         assert!(!r.commands.erase_confirm.is_empty());
         assert!(!r.commands.erase_done.is_empty());
         assert!(!r.commands.forget_done.is_empty());
+    }
+
+    #[test]
+    fn agreement_sha_is_deterministic_64_hex_and_operator_sensitive() {
+        // 64 lowercase hex chars (sha256), stable across calls.
+        let a = agreement_sha("Op A");
+        assert_eq!(a.len(), 64, "sha256 hex is 64 chars");
+        assert!(a.chars().all(|c| c.is_ascii_hexdigit()), "hex-only: {a}");
+        assert_eq!(
+            a,
+            agreement_sha("Op A"),
+            "deterministic for the same operator"
+        );
+        // The agreement substitutes {operator}, so a different operator → different sha.
+        assert_ne!(
+            a,
+            agreement_sha("Op B"),
+            "operator substitution changes the agreement text → changes the sha"
+        );
+    }
+
+    #[test]
+    fn current_version_matches_consent_version() {
+        assert_eq!(current_version(), consent_version());
     }
 
     #[test]

@@ -418,6 +418,12 @@ fn now_unix() -> u64 {
         .unwrap_or(0)
 }
 
+/// CO-491: current time as an RFC 3339 string — the `whatsapp_consent_at`
+/// timestamp recorded against the user at link time.
+fn now_rfc3339() -> String {
+    chrono::Utc::now().to_rfc3339()
+}
+
 /// The OTP HMAC secret: `CO_WHATSAPP_OTP_SECRET` when set/non-empty, else the
 /// `JWT_SECRET` (already required in prod). Never returns an empty string in a
 /// configured deployment.
@@ -541,8 +547,15 @@ pub async fn link_verify_handler(
         return Err(AppError::Unauthorized("invalid or expired code".into()));
     }
 
+    // CO-491: the operator/community whose consent copy applies (same default the
+    // public consent endpoint uses). Captured here so the recorded sha matches the
+    // exact agreement text this deployment renders.
+    let operator = super::whatsapp_consent::default_operator();
+    let consent_version = super::whatsapp_consent::current_version();
+
     // (a) uniqueness, (b) set number, (c) revoke prior bot tokens, (d) mint the
-    // scoped token — all under one lock; the lock drops before any network I/O.
+    // scoped token, (f) record the agreed consent version — all under one lock;
+    // the lock drops before any network I/O.
     let token = {
         let storage = crate::server::state::lock_storage(&state);
 
@@ -560,6 +573,22 @@ pub async fn link_verify_handler(
         storage
             .set_user_whatsapp(&user_id.0, &digits)
             .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        // (f) CO-491: durably record the consent version + agreement fingerprint
+        //     the user just agreed to (LGPD demonstrabilidade, Art. 8º §2º).
+        //     Best-effort: a write failure is logged but NEVER fails the link —
+        //     the user is already linked CO-side and the version is still logged
+        //     below. The sha pins the exact agreement copy this operator renders.
+        let consent_sha = super::whatsapp_consent::agreement_sha(&operator);
+        if let Err(e) =
+            storage.set_whatsapp_consent(&user_id.0, consent_version, &now_rfc3339(), &consent_sha)
+        {
+            tracing::warn!(
+                user_id = %user_id.0,
+                error = %e,
+                "CO-491: failed to persist whatsapp consent record (link still succeeds)"
+            );
+        }
 
         // (c) #6: revoke prior `whatsapp-bot` tokens before minting a fresh one.
         storage
@@ -579,10 +608,9 @@ pub async fn link_verify_handler(
     best_effort_identity_push(&user_id.0, &digits, &token).await;
 
     // CO-491: log the consent version the user agreed to (LGPD demonstrabilidade).
-    // Durable per-user persistence of the agreed version needs a schema column =
-    // a coordinated migration (NOT added here; tracked in CHANGELOG-PENDING) — for
-    // now the agreed version is auditable via this log + the response field.
-    let consent_version = super::whatsapp_consent::consent_version();
+    // This is now ALSO persisted durably above (users.whatsapp_consent_version/_at/
+    // _sha, migration v094) so the agreement survives a restart and is queryable
+    // for an LGPD request; the log + response field remain for live auditing.
     tracing::info!(
         user_id = %user_id.0,
         consent_version = %consent_version,
