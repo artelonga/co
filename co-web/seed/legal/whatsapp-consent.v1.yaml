@@ -1,0 +1,65 @@
+# WhatsApp assistant — consent & privacy microcopy (DETERMINISTIC, VERSIONED).
+#
+# This file is a LEGAL ARTIFACT, not conversational copy. The LLM may phrase
+# *help*, but it must NEVER phrase, paraphrase, translate, or "warm up" anything
+# here. The bot displays these strings VERBATIM, and the version below is what
+# gets recorded against the user's consent (CO-491) so the exact text they agreed
+# to is reproducible for LGPD (Lei 13.709/2018, demonstrabilidade — Art. 8º §2º).
+#
+# To change any wording, mint a NEW version (new file, e.g. .v2.yaml) and bump
+# `version` — never edit a published version in place. Old versions are retained
+# so historical consents stay verifiable.
+#
+# `{operator}` is the only substitution: the deploying community/operator name
+# (from config). No other interpolation, no model output, ever.
+
+version: "whatsapp-consent/2026-06-27.v1"
+locale: pt-BR
+
+# Shown at link time (the OTP "é você mesmo?" moment). This exact text is what we
+# store as the consent record. The user agrees by completing the OTP verify.
+agreement: |
+  Quer um cantinho só seu? Vou te mandar um código aqui no WhatsApp pra ter
+  certeza que é você. Suas coisas ficam no computador de {operator} — não soltas
+  na internet pra qualquer um ver. Você pode levar tudo ou apagar quando quiser.
+  Pode ser? 🌱
+
+# The honest boundary — shown during onboarding. We do NOT pretend WhatsApp is
+# private end-to-end on a Business number.
+boundary: |
+  Uma coisa importante, com sinceridade: o WhatsApp é da Meta. O que você me
+  *fala* por aqui passa pelos servidores deles. Mas o que você *guarda* fica no
+  computador de {operator}, não no deles — e quando você quiser uma porta mais
+  reservada, eu te mostro.
+
+# What runs where (the "como funciona" rung). True because the bot defaults to a
+# local model — no third party sees the content unless an operator explicitly
+# enables spill (which requires its own consent update).
+how_it_works: |
+  Suas palavras são entendidas aqui mesmo, na máquina de {operator} — não vão pra
+  um robô gigante lá fora. O que você guarda vira um arquivo que é seu. A receita
+  desse ajudante é aberta: qualquer pessoa pode ler, copiar e melhorar. Nada é
+  escondido de você.
+
+# Sacred-command confirmations — deterministic, never LLM-generated. These are
+# rights, so their wording is fixed.
+commands:
+  export: |
+    Aqui está tudo que eu tenho guardado de você. É seu — pode abrir, guardar em
+    outro lugar, ou me pedir pra apagar.
+  erase_confirm: |
+    Só pra confirmar: você quer que eu apague TUDO que está no seu cantinho? Isso
+    não tem volta. Responde "apagar tudo" pra confirmar, ou "não" pra deixar como
+    está.
+  erase_done: |
+    Pronto. Apaguei tudo que era seu. Seu cantinho está vazio de novo.
+  forget_done: |
+    Pode deixar. Esqueci como entrar no seu cantinho — suas coisas continuam lá,
+    mas só você abre agora. Se um dia quiser voltar, é só me chamar.
+
+# Plain-language statement of the LGPD rights this bot honors (Art. 18).
+rights: |
+  Seus direitos, sempre: ver tudo que é seu ("mostra minhas coisas"), apagar tudo
+  ("apaga tudo"), e me fazer esquecer como entrar ("esquece de mim"). Sem pegadinha,
+  sem dificultar a saída. Isso inclui o que eu mesmo escrevi ou organizei pra você —
+  também é seu.

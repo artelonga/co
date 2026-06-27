@@ -118,3 +118,70 @@ Absent/unreadable profile → the generic CO concierge (lifecycle only).
    subscribe to `messages`; the GET verify handshake should pass.
 3. Send a WhatsApp message to the test number from an allow-listed recipient;
    confirm the reply. Watch `flyctl logs -a co-artelonga` for `WhatsApp Cloud inbound`.
+
+---
+
+## UX north star — an amicable journey (general)
+
+The front door is for someone whose entire digital comfort zone is WhatsApp, yet
+who is **eager to understand the technology underneath** — and who deserves real
+privacy and data autonomy *because of*, not despite, that. Two commitments:
+
+1. **Everything happens inside WhatsApp.** No website, password, download, or
+   copy-pasted token — ever. The one code the user touches is the OTP, which
+   arrives *in WhatsApp itself* (a trust primitive they already own).
+2. **Tell the truth in rungs; never use a dark pattern.** The privacy story isn't
+   a policy they'll never read — it's experiences they can feel and verify.
+
+The arc (hospitality → belonging → understanding → autonomy → reciprocity):
+
+- **Useful before any ask** — read-only help with no account (reframed as
+  hospitality, not a limitation), and a plain statement of what the bot is/isn't.
+- **The link *is* the consent moment** — "um cantinho só seu", confirmed by the OTP
+  on their own WhatsApp. The exact words they agree to are the deterministic,
+  versioned consent text (below), recorded as the LGPD record.
+- **The everyday** — they talk (and speak — voice in/out, transcribed locally is
+  the biggest accessibility+privacy unlock, CO-494); the graph/universe machinery
+  is never named ("seu jardim").
+- **The curtain lifts — progressive disclosure** (CO-495): optional "look-behind"
+  doors, each teaching one real concept — *local AI* ("como funciona"), *data you
+  can hold* ("mostra minhas coisas" returns their file), *open source* ("a receita
+  é aberta"), *no lock-in* ("você leva seu jardim e ele continua funcionando").
+- **The three sacred commands** (CO-493), always honored, no friction on exit:
+  `mostra minhas coisas` (export), `apaga tudo` (erasure), `esquece de mim` (revoke
+  the bot's per-user token).
+- **Reciprocity** — the eager learner becomes a co-creator who brings the next
+  person in (`ñandé`, not `oré`).
+
+**The honest knot:** we deliver autonomy *through* Meta's WhatsApp — content to a
+Business-API number is not E2E-private. We **name this** (the `boundary` text) and
+treat WhatsApp as the on-ramp, not the destination, widening the user's world
+toward a more private door over time. Honesty here is the privacy feature.
+
+**North star ≠ engagement.** Success is: the user *feels ownership*, *understood a
+little of the magic*, *trusts because they verified*, **could leave and chose to
+stay**, and **brought someone in.** Autonomy, comprehension, dignity, community.
+
+### Consent & privacy are deterministic and versioned (CO-491)
+
+Consent, privacy, rights, and the sacred-command confirmations are **legal
+artifacts, not conversational copy**. The LLM phrases *help*; it **never** phrases,
+paraphrases, translates, or warms up the agreement. The single source of truth is
+the versioned file **`co-web/seed/legal/whatsapp-consent.<version>.yaml`**, shown
+**verbatim**; the version is recorded against the user's consent so the exact text
+they agreed to is reproducible (LGPD Art. 8º §2º — demonstrabilidade). Changing
+wording means minting a **new version**; published versions are never edited in
+place. The bot's `bot/profile` (see `docs/whatsapp-bot-profile.example.json`)
+routes these intents to the deterministic strings *before* the model loop.
+
+### LLM-curated content is the user's data (CO-492)
+
+Anything the assistant writes or organizes **for** a user is **that user's data**
+under LGPD — persisted in their space, included in `mostra minhas coisas` (export)
+and `apaga tudo` (erasure), and removed when they revoke. The model is a lens over
+the user's substrate, never an owner of what it produces for them.
+
+> Release work items: **CO-489/490 (done)**, **CO-491** (deterministic consent),
+> **CO-492** (LGPD retention/export of curated content), **CO-493** (sacred
+> commands), **CO-494** (local voice I/O), **CO-495** (warm profile + disclosure
+> rungs), **CO-496** (tier-3 scalability). See `work/co/CO-49*.md`.
