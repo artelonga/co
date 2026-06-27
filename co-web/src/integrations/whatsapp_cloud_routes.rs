@@ -232,9 +232,10 @@ fn brain_url() -> String {
 /// when the Cloud API isn't configured; falls back to a fixed ack if the brain
 /// is unreachable so the user always gets a response.
 async fn reply_to(msg: &InboundMsg) -> Result<(), String> {
-    use crate::notification_providers::{ChannelProvider, CloudApiProvider};
-    let provider = CloudApiProvider::from_env()
-        .ok_or("CloudApiProvider not configured (WHATSAPP_CLOUD_TOKEN/PHONE_NUMBER_ID)")?;
+    // CO-497: cascade (Cloud → Evolution) so self-hosted deploys (Evolution only)
+    // reply identically to managed Cloud deploys.
+    let provider = crate::notification_providers::whatsapp_provider_cascade()
+        .ok_or("no WhatsApp provider configured (Cloud API or Evolution)")?;
     // CO-489: ONE shared, timed client for both the brain hop and the Cloud send.
     let client = shared_client();
     let reply = fetch_brain_reply(client, &brain_url(), &msg.text, &msg.phone_number_id)
@@ -484,17 +485,16 @@ pub async fn link_start_handler(
 
     // Proof-of-possession requires an outbound channel; without it we cannot
     // prove the caller controls the number, so refuse rather than link blindly.
-    let provider =
-        crate::notification_providers::CloudApiProvider::from_env().ok_or_else(|| {
-            AppError::ServiceUnavailable(
-                "WhatsApp Cloud API not configured (cannot send verification code)".into(),
-            )
-        })?;
+    // CO-497: cascade (Cloud → Evolution) so self-hosters on Evolution can link.
+    let provider = crate::notification_providers::whatsapp_provider_cascade().ok_or_else(|| {
+        AppError::ServiceUnavailable(
+            "no WhatsApp provider configured (Cloud API or Evolution) — cannot send code".into(),
+        )
+    })?;
 
     let code = compute_otp(&otp_secret(), &user_id.0, &digits, otp_bucket(now_unix()));
     let client = shared_client();
     let body = format!("Seu código de verificação CO: {code}");
-    use crate::notification_providers::ChannelProvider;
     provider.send(client, &digits, &body).await.map_err(|e| {
         AppError::ServiceUnavailable(format!("failed to send verification code: {e}"))
     })?;

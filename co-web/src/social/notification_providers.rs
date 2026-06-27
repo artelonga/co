@@ -331,6 +331,21 @@ pub fn encode_email_payload(subject: &str, body: &str) -> String {
     format!("{subject}\n---\n{body}")
 }
 
+/// CO-497: the WhatsApp send cascade — **the self-host/managed invariant in one
+/// place**. Prefer the official Cloud API (managed/public deploys with a Meta app
+/// and token), else fall back to Evolution (self-host: QR-links your own WhatsApp,
+/// outbound-only, no Meta app and no public webhook — survives residential CGNAT).
+/// `None` ⇒ no channel configured (callers log/no-op). Every WhatsApp send (OTP,
+/// reply, greeting) goes through this so a self-hosted deploy with only Evolution
+/// works identically to a managed Cloud deploy.
+pub fn whatsapp_provider_cascade() -> Option<Box<dyn ChannelProvider>> {
+    CloudApiProvider::from_env()
+        .map(|p| Box::new(p) as Box<dyn ChannelProvider>)
+        .or_else(|| {
+            EvolutionApiProvider::from_env().map(|p| Box::new(p) as Box<dyn ChannelProvider>)
+        })
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------

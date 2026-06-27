@@ -185,3 +185,42 @@ the user's substrate, never an owner of what it produces for them.
 > **CO-492** (LGPD retention/export of curated content), **CO-493** (sacred
 > commands), **CO-494** (local voice I/O), **CO-495** (warm profile + disclosure
 > rungs), **CO-496** (tier-3 scalability). See `work/co/CO-49*.md`.
+
+---
+
+## Deployment modes — self-host always possible, or managed-with-consent (CO-497)
+
+Two guarantees hold for the whole release:
+
+1. **You can ALWAYS self-host the whole thing** — your data on your box, nothing
+   required from our infra or any third party.
+2. **Or opt into managed infra** knowing your data is yours, safe, and private — we
+   collect nothing (e.g. telemetry) without explicit consent under a *specific,
+   versioned* policy. This includes sensitive data (WhatsApp number, secrets) and
+   identifying data (name, CPF) you choose to keep as an instance-local variable.
+
+| | **Self-host** (your box) | **Managed** (our infra / your public host) |
+|---|---|---|
+| WhatsApp transport | **Evolution** — QR-link your own WhatsApp, outbound-only, **no Meta app, no public webhook** (survives residential CGNAT) | **Cloud API** — Meta app + token + public HTTPS webhook |
+| Inbound | Evolution → bridge `/webhook` (LAN/loopback, no open port) | Meta → co-web `/api/v1/whatsapp/webhook` |
+| Sends (OTP/reply/greeting) | the **same** `whatsapp_provider_cascade()` picks Evolution | …picks Cloud API |
+| Model | local Ollama (default) | local Ollama; opt-in Claude spill (policy update required) |
+| Data (tokens, consent, content, name/CPF) | **all local**, encrypted at rest | yours; never collected without consent under a specific policy |
+| Public domain | optional — **Cloudflare Tunnel** if you want one (CGNAT-proof, TLS); not needed for LAN/private | native |
+| Ops you own | autostart (launchd), live backup (Litestream → B2/S3), UPS | ~none |
+
+**The code is identical across modes** — `notification_providers::whatsapp_provider_cascade()`
+(Cloud → Evolution) means a self-hosted deploy with only Evolution behaves exactly
+like a managed Cloud deploy; no fork, no special build.
+
+**Data residency invariant:** sensitive (WhatsApp number, secrets/tokens) and
+identifying (name, CPF) fields are stored **on the instance**, encrypted where
+applicable, and are **never** sent to our infra or a third party in the default
+path. On managed infra, anything we'd collect (telemetry, diagnostics) is **opt-in
+under its own versioned policy** — default OFF, distinct from the core consent
+(CO-491). A "local variable" stays local.
+
+> Self-host ops files (launchd plist, run/import scripts, OrbStack compose,
+> `cloudflared` example) are the operator's choice for a *public* self-host — a
+> private/LAN Evolution deploy needs none of them. They live with the deploying
+> repo, not the app.

@@ -18,7 +18,7 @@ use serde::Deserialize;
 use serde_json::json;
 
 use crate::auth::UserId;
-use crate::notification_providers::{ChannelProvider, CloudApiProvider, EvolutionApiProvider};
+use crate::notification_providers::ChannelProvider;
 use crate::server::AppState;
 
 // ---------------------------------------------------------------------------
@@ -127,12 +127,8 @@ pub async fn run_birthday_job(state: &AppState) -> usize {
     if targets.is_empty() {
         return 0;
     }
-    let provider: Option<Box<dyn ChannelProvider>> = CloudApiProvider::from_env()
-        .map(|p| Box::new(p) as Box<dyn ChannelProvider>)
-        .or_else(|| {
-            EvolutionApiProvider::from_env().map(|p| Box::new(p) as Box<dyn ChannelProvider>)
-        });
-    let Some(provider) = provider else {
+    // CO-497: shared Cloud → Evolution cascade (managed → self-host).
+    let Some(provider) = crate::notification_providers::whatsapp_provider_cascade() else {
         for (_, name, number) in &targets {
             tracing::info!(
                 "[birthday dev-fallback] no WhatsApp provider configured — would greet {}: {}",
