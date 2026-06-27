@@ -19,14 +19,24 @@
 //! This endpoint only *reads/organizes* telemetry into a digest. It never
 //! publishes or sends anything — no WhatsApp message is dispatched here.
 //!
-//! ## Gating
+//! ## Gating & multi-tenant scope (CO-499 fix)
 //!
-//! `GET /api/v1/whatsapp/telemetry/digest` self-gates via
+//! `GET /api/v1/whatsapp/telemetry/digest?universe=<key>` self-gates via
 //! [`Scoped<TelemetryRead>`](crate::auth::extractors::Scoped) (`telemetry:read`,
 //! CO-448), mirroring [`crate::telemetry_api`]: a full JWT/session passes, and a
 //! least-privilege token carrying `telemetry:read` passes — a token lacking it
-//! (e.g. `entries:read`-only) gets 403, an unauthenticated caller 401. No new
-//! schema and no new migration: every field is read from `telemetry_events`.
+//! (e.g. `entries:read`-only) gets 403, an unauthenticated caller 401.
+//!
+//! **The digest is ALWAYS scoped to a single universe the CALLER can read.** The
+//! `universe` query param is **required** (`400` when absent), and the caller —
+//! the identity resolved by `Scoped<TelemetryRead>` — must hold READ access to
+//! it under the deterministic CO-49 check ([`Storage::check_universe_access`]),
+//! exactly as every per-universe read route authorizes; a caller without read
+//! access gets `403`. The SQL then filters on `telemetry_events.universe_key`, so
+//! a `telemetry:read` holder can never read the names/browsing of leads in a
+//! universe they cannot read (the multi-tenant leak this fix closes). No new
+//! schema and no new migration: every field is read from `telemetry_events`,
+//! whose `universe_key` column is already present and indexed.
 
 use std::collections::BTreeMap;
 
@@ -38,6 +48,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 
 use crate::auth::extractors::{Scoped, TelemetryRead};
+use crate::content::models::UniverseAccess;
 use crate::platform::error::AppError;
 use crate::server::AppState;
 
@@ -362,23 +373,44 @@ pub struct DigestQuery {
     /// Look-back window in days. Defaults to [`DEFAULT_WINDOW_DAYS`], clamped to
     /// `[1, MAX_WINDOW_DAYS]`.
     pub days: Option<i64>,
+    /// REQUIRED — the universe to scope the digest to. The caller must hold READ
+    /// access to it; the telemetry query is filtered by this `universe_key`.
+    /// Absent/blank ⇒ `400` (CO-499 multi-tenant fix).
+    pub universe: Option<String>,
+}
+
+/// Authorize the caller's resolved [`UniverseAccess`] for a digest read: a digest
+/// exposes per-subject names + browsing behavior, so it requires real READ access
+/// (owner / member / subscriber / public-static). `MetadataOnly`, `LoginRequired`
+/// and `Denied` are NOT read access → `403`. Mirrors the per-universe read gate.
+fn ensure_read_access(access: UniverseAccess) -> Result<(), AppError> {
+    match access {
+        UniverseAccess::ReadOnly | UniverseAccess::ReadWrite => Ok(()),
+        UniverseAccess::MetadataOnly | UniverseAccess::LoginRequired | UniverseAccess::Denied => {
+            Err(AppError::Forbidden(
+                "you do not have read access to this universe".into(),
+            ))
+        }
+    }
 }
 
 /// Project the relevant `telemetry_events` columns for a window into rows. Reads
 /// only — pageviews carry the dwell (`duration_ms`); referrer/language are
 /// lifted from the JSON `properties` (`referrer`/`ref`, `lang`).
-fn load_rows(conn: &rusqlite::Connection, since_ts: i64) -> Vec<TelemetryRow> {
+fn load_rows(conn: &rusqlite::Connection, since_ts: i64, universe: &str) -> Vec<TelemetryRow> {
     let since_rfc3339 = chrono::DateTime::<chrono::Utc>::from_timestamp(since_ts, 0)
         .unwrap_or_else(chrono::Utc::now)
         .to_rfc3339();
+    // CO-499: scope to ONE universe (the caller-authorized `universe_key`). The
+    // (universe_key, timestamp) index backs this filter.
     let Ok(mut stmt) = conn.prepare(
         "SELECT timestamp, visitor_token, user_id, path, duration_ms, properties \
          FROM telemetry_events \
-         WHERE event_type = 'pageview' AND timestamp >= ?1",
+         WHERE event_type = 'pageview' AND timestamp >= ?1 AND universe_key = ?2",
     ) else {
         return Vec::new();
     };
-    stmt.query_map([since_rfc3339], |r| {
+    stmt.query_map(rusqlite::params![since_rfc3339, universe], |r| {
         let timestamp: String = r.get(0)?;
         let visitor_token: Option<String> = r.get(1)?;
         let user_id: Option<String> = r.get(2)?;
@@ -443,12 +475,22 @@ fn parse_props(properties: Option<&str>) -> (Option<String>, Option<String>) {
     (referrer, language)
 }
 
-/// `GET /api/v1/whatsapp/telemetry/digest` — read-only lead-temperature digest.
+/// `GET /api/v1/whatsapp/telemetry/digest?universe=<key>` — read-only
+/// lead-temperature digest, scoped to ONE universe the caller can read.
 async fn digest_handler(
-    _cap: Scoped<TelemetryRead>,
+    cap: Scoped<TelemetryRead>,
     State(state): State<AppState>,
     Query(q): Query<DigestQuery>,
 ) -> Result<Json<Digest>, AppError> {
+    // CO-499: the universe to scope to is REQUIRED — a digest is never global.
+    let universe = q
+        .universe
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| AppError::BadRequest("universe is required".into()))?
+        .to_string();
+
     let window_days = q
         .days
         .unwrap_or(DEFAULT_WINDOW_DAYS)
@@ -457,11 +499,17 @@ async fn digest_handler(
     let now = chrono::Utc::now().timestamp();
     let since = now - window_seconds;
 
-    // One lock: pull the window's rows AND resolve the named subjects' display
-    // names, then drop the lock before the (pure) compute.
+    // One lock: authorize the caller for THIS universe, then pull the window's
+    // rows AND resolve the named subjects' display names; drop the lock before
+    // the (pure) compute.
     let (rows, name_map) = {
         let storage = state.core.storage.lock();
-        let rows = load_rows(storage.conn(), since);
+        // CO-499 multi-tenant gate: the caller resolved by `Scoped<TelemetryRead>`
+        // must hold READ access to `universe` (same deterministic CO-49 check
+        // every per-universe read route uses). Without it, a `telemetry:read`
+        // holder could read names + browsing behavior of leads across tenants.
+        ensure_read_access(storage.check_universe_access(Some(&cap.user_id), &universe))?;
+        let rows = load_rows(storage.conn(), since, &universe);
         let mut name_map: BTreeMap<String, String> = BTreeMap::new();
         for r in &rows {
             if let Some(uid) = r.user_id.as_deref().filter(|s| !s.is_empty())
@@ -697,5 +745,98 @@ mod tests {
         assert_eq!(parse_props(None), (None, None));
         assert_eq!(parse_props(Some("not json")), (None, None));
         assert_eq!(parse_props(Some(r#"{"ref":""}"#)), (None, None));
+    }
+
+    // ---- CO-499 MULTI-TENANT SCOPE (load_rows filter + access gate) ----
+
+    use crate::storage::Storage;
+
+    fn insert_pageview(
+        conn: &rusqlite::Connection,
+        universe: &str,
+        user: Option<&str>,
+        visitor: Option<&str>,
+        ts_rfc3339: &str,
+    ) {
+        conn.execute(
+            "INSERT INTO telemetry_events \
+             (timestamp, event_type, event_name, universe_key, user_id, visitor_token, path, duration_ms) \
+             VALUES (?1, 'pageview', 'pageview', ?2, ?3, ?4, '/precos', 40000)",
+            rusqlite::params![ts_rfc3339, universe, user, visitor],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn load_rows_scopes_to_the_requested_universe_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = Storage::new(dir.path());
+        let now = chrono::Utc::now();
+        let ts = now.to_rfc3339();
+        let conn = storage.conn();
+        // Universe A: one identified user + one anonymous visitor.
+        insert_pageview(conn, "uni-a", Some("usr_alice"), Some("al_a1"), &ts);
+        insert_pageview(conn, "uni-a", None, Some("al_a2"), &ts);
+        // Universe B: a DIFFERENT identified user — must never appear in A's digest.
+        insert_pageview(conn, "uni-b", Some("usr_bob"), Some("al_b1"), &ts);
+
+        let since = (now - chrono::Duration::days(7)).timestamp();
+        let rows = load_rows(conn, since, "uni-a");
+
+        // The `universe` param is HONORED: exactly universe A's rows return; B is
+        // never leaked across tenants.
+        assert_eq!(rows.len(), 2, "exactly universe A's two rows");
+        let users: Vec<&str> = rows.iter().filter_map(|r| r.user_id.as_deref()).collect();
+        assert!(users.contains(&"usr_alice"));
+        assert!(
+            !users.contains(&"usr_bob"),
+            "universe B's identified user must not leak into universe A's digest"
+        );
+
+        // The anonymous-aggregate invariant still holds on the loaded rows: the
+        // anonymous visitor stays aggregate-only; only the identified user is named.
+        let digest = compute_digest(&rows, now.timestamp(), 7 * DAY);
+        let named: Vec<&str> = digest.named.iter().map(|l| l.subject.as_str()).collect();
+        assert_eq!(named, vec!["usr_alice"]);
+        assert_eq!(digest.aggregate.count, 1);
+    }
+
+    #[test]
+    fn ensure_read_access_admits_readers_denies_others() {
+        assert!(ensure_read_access(UniverseAccess::ReadOnly).is_ok());
+        assert!(ensure_read_access(UniverseAccess::ReadWrite).is_ok());
+        assert!(ensure_read_access(UniverseAccess::MetadataOnly).is_err());
+        assert!(ensure_read_access(UniverseAccess::LoginRequired).is_err());
+        assert!(ensure_read_access(UniverseAccess::Denied).is_err());
+    }
+
+    #[test]
+    fn digest_is_scoped_to_a_universe_the_caller_can_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut storage = Storage::new(dir.path());
+        let owner = storage.create_user("owner@x.com", "Owner").unwrap();
+        storage
+            .create_universe(
+                crate::models::CreateUniverse {
+                    key: "tenant-a".into(),
+                    name: "Tenant A".into(),
+                    description: String::new(),
+                },
+                &owner.id,
+            )
+            .unwrap();
+
+        // Caller WITH access (the owner) is admitted.
+        assert!(
+            ensure_read_access(storage.check_universe_access(Some(&owner.id), "tenant-a")).is_ok(),
+            "owner has read access to its own (private) universe"
+        );
+        // Caller WITHOUT access (a telemetry:read holder for a *different* tenant)
+        // is denied — the CO-499 cross-tenant leak is closed.
+        assert!(
+            ensure_read_access(storage.check_universe_access(Some("intruder"), "tenant-a"))
+                .is_err(),
+            "a caller without read access to the universe is denied"
+        );
     }
 }
