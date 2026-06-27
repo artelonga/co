@@ -178,7 +178,11 @@ impl EvolutionApiProvider {
     pub fn from_env() -> Option<Self> {
         let secrets = crate::infra::secrets::global();
         let api_key = secrets.get("EVOLUTION_API_KEY")?;
-        let api_url = secrets.get_or("EVOLUTION_API_URL", "https://api.evolution-api.com");
+        // CO-497: default to a LOCAL Evolution (self-host) — never the public SaaS.
+        // A self-hoster who sets only EVOLUTION_API_KEY must not have their WhatsApp
+        // silently routed through a third party; set EVOLUTION_API_URL explicitly
+        // to target a remote instance.
+        let api_url = secrets.get_or("EVOLUTION_API_URL", "http://localhost:8080");
         let instance = secrets.get_or("EVOLUTION_INSTANCE", "default");
         Some(Self {
             api_url,
