@@ -386,6 +386,10 @@ fn bot_token_scopes() -> std::collections::BTreeSet<String> {
         "entries:read".to_string(),
         "entries:write".to_string(),
         "universes:read".to_string(),
+        // CO-499: read-only telemetry so the bot can produce the lead-temperature
+        // digest (output B) for the user's own universes. Still least-privilege —
+        // read-only, no write/admin/token-management.
+        "telemetry:read".to_string(),
     ])
     .expect("static bot scope set is valid")
 }
@@ -963,10 +967,12 @@ mod tests {
     #[test]
     fn bot_token_scopes_is_least_privilege() {
         let scopes = bot_token_scopes();
-        // Exactly the three needed: read/write entries + read universes.
+        // The least-privilege set: read/write entries, read universes, read
+        // telemetry (CO-499 digest). All read except entries:write.
         assert!(scopes.contains("entries:read"));
         assert!(scopes.contains("entries:write"));
         assert!(scopes.contains("universes:read"));
+        assert!(scopes.contains("telemetry:read"));
         // Never universes:write, admin surfaces, or agent dispatch.
         assert!(!scopes.contains("universes:write"));
         assert!(!scopes.contains("chat:read"));
@@ -975,7 +981,11 @@ mod tests {
         assert!(!scopes.contains("funnel:read"));
         assert!(!scopes.contains("deployments:read"));
         assert!(!scopes.contains("agent:dispatch"));
-        assert_eq!(scopes.len(), 3, "exactly the three least-privilege scopes");
+        assert_eq!(
+            scopes.len(),
+            4,
+            "exactly the four least-privilege scopes (entries r/w, universes:read, telemetry:read)"
+        );
     }
 
     #[test]

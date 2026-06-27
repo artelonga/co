@@ -652,6 +652,9 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             // each handler self-gates via `Scoped<TelemetryRead>` (CO-448
             // `telemetry:read`), so no auth middleware layer is needed here.
             .nest("/api/v1/telemetry", crate::telemetry_api::router())
+            // CO-499: read-only lead-temperature digest (output B). Self-gates
+            // via `Scoped<TelemetryRead>` (telemetry:read), so no auth layer here.
+            .nest("/api/v1", crate::lead_digest::router())
             .nest("/api/v1", crate::search_routes::router())
             .nest(
                 "/api/v1/auth/recovery",

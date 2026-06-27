@@ -152,6 +152,7 @@ pub use platform::geo;
 pub use platform::index_manager;
 pub use platform::job_queue;
 pub use platform::kb_routes;
+pub use platform::lead_digest;
 pub use platform::live_routes;
 pub use platform::observability;
 pub use platform::pipeline;
