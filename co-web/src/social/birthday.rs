@@ -18,7 +18,7 @@ use serde::Deserialize;
 use serde_json::json;
 
 use crate::auth::UserId;
-use crate::notification_providers::ChannelProvider;
+use crate::notification_providers::{ChannelProvider, OutboundTemplate};
 use crate::server::AppState;
 
 // ---------------------------------------------------------------------------
@@ -98,15 +98,28 @@ pub fn select_birthday_targets(
 }
 
 /// Send the greeting to each target via `provider`. Returns the ids that sent OK.
+///
+/// CO-496: a birthday greeting is **business-initiated** — the user almost never
+/// messaged us in the last 24h, so the customer-service window is closed and Meta
+/// rejects free-form text. `template` (configured via `CO_WHATSAPP_BIRTHDAY_TEMPLATE`)
+/// is the approved fallback; its single body param is the greeted user's name.
+/// When the window happens to be open (or the provider has no window, e.g.
+/// Evolution) free-form text is used.
 pub async fn send_greetings(
     provider: &dyn ChannelProvider,
     client: &reqwest::Client,
     targets: &[(String, String, String)],
+    template: Option<&OutboundTemplate>,
 ) -> Vec<String> {
     let mut sent = Vec::new();
     for (id, name, number) in targets {
         let msg = compose_greeting(name);
-        match provider.send(client, number, &msg).await {
+        // Per-recipient template params: the greeted user's name fills `{{1}}`.
+        let per_target = template.map(|base| base.with_params(vec![name.clone()]));
+        match provider
+            .send_business_initiated(client, number, &msg, per_target.as_ref())
+            .await
+        {
             Ok(()) => sent.push(id.clone()),
             Err(e) => tracing::warn!("birthday send to {} failed: {e}", redact(number)),
         }
@@ -138,8 +151,17 @@ pub async fn run_birthday_job(state: &AppState) -> usize {
         }
         return 0;
     };
-    let client = reqwest::Client::new();
-    let sent = send_greetings(provider.as_ref(), &client, &targets).await;
+    // CO-496: reuse the process-wide 30s-timed client (was an untimed
+    // `Client::new()` that could hang a worker indefinitely on a stuck send).
+    let client = crate::whatsapp_cloud_routes::shared_client();
+    // CO-496: approved-template fallback for the closed-window case (params filled
+    // per-recipient inside `send_greetings`).
+    let template = crate::notification_providers::template_from_env(
+        "CO_WHATSAPP_BIRTHDAY_TEMPLATE",
+        "CO_WHATSAPP_BIRTHDAY_TEMPLATE_LANG",
+        Vec::new(),
+    );
+    let sent = send_greetings(provider.as_ref(), client, &targets, template.as_ref()).await;
     {
         let storage = state.core.storage.lock();
         for id in &sent {
@@ -355,7 +377,7 @@ mod tests {
         let mock = MockProvider {
             calls: calls.clone(),
         };
-        let sent = send_greetings(&mock, &reqwest::Client::new(), &targets).await;
+        let sent = send_greetings(&mock, &reqwest::Client::new(), &targets, None).await;
         assert_eq!(sent, vec!["u_yuri".to_string()]);
         let captured = calls.lock().unwrap();
         assert_eq!(captured.len(), 1);

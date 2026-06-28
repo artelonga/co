@@ -373,10 +373,32 @@ pub struct DigestQuery {
     /// Look-back window in days. Defaults to [`DEFAULT_WINDOW_DAYS`], clamped to
     /// `[1, MAX_WINDOW_DAYS]`.
     pub days: Option<i64>,
+    /// CO-518 alias for [`days`](Self::days): the look-back window in the bot's
+    /// `"<n>d"` form (e.g. `"7d"`, `"30d"`; a bare `"7"` also parses). The bot
+    /// (`co_tools.telemetry_digest`) sends THIS param, so without it the window was
+    /// silently ignored. [`days`](Self::days) wins when both are present.
+    pub window: Option<String>,
     /// REQUIRED — the universe to scope the digest to. The caller must hold READ
     /// access to it; the telemetry query is filtered by this `universe_key`.
     /// Absent/blank ⇒ `400` (CO-499 multi-tenant fix).
     pub universe: Option<String>,
+}
+
+/// Resolve the look-back window in days from the two accepted params. `days` (the
+/// legacy integer) wins when positive; otherwise the bot's `window` form (`"7d"`,
+/// `"30d"`, or a bare `"7"`; trailing `d`/`D` optional) is parsed. Returns `None`
+/// when neither yields a positive value → caller applies [`DEFAULT_WINDOW_DAYS`].
+/// Pure → unit-testable.
+pub fn parse_window_days(days: Option<i64>, window: Option<&str>) -> Option<i64> {
+    if let Some(d) = days.filter(|&d| d > 0) {
+        return Some(d);
+    }
+    let w = window?.trim();
+    let digits = w
+        .strip_suffix(|c: char| c == 'd' || c == 'D')
+        .unwrap_or(w)
+        .trim();
+    digits.parse::<i64>().ok().filter(|&d| d > 0)
 }
 
 /// Authorize the caller's resolved [`UniverseAccess`] for a digest read: a digest
@@ -491,8 +513,8 @@ async fn digest_handler(
         .ok_or_else(|| AppError::BadRequest("universe is required".into()))?
         .to_string();
 
-    let window_days = q
-        .days
+    // CO-518: accept both the legacy `days` integer and the bot's `window="7d"`.
+    let window_days = parse_window_days(q.days, q.window.as_deref())
         .unwrap_or(DEFAULT_WINDOW_DAYS)
         .clamp(1, MAX_WINDOW_DAYS);
     let window_seconds = window_days * SECS_PER_DAY;
@@ -838,5 +860,43 @@ mod tests {
                 .is_err(),
             "a caller without read access to the universe is denied"
         );
+    }
+
+    // ---- CO-518: window param (bot sends "7d", server only read `days`) ----
+
+    #[test]
+    fn parse_window_days_accepts_bot_form_and_legacy_days() {
+        // The bot's "<n>d" form.
+        assert_eq!(parse_window_days(None, Some("7d")), Some(7));
+        assert_eq!(parse_window_days(None, Some("30d")), Some(30));
+        assert_eq!(parse_window_days(None, Some("30D")), Some(30));
+        // Bare integer string, with surrounding whitespace.
+        assert_eq!(parse_window_days(None, Some("  14 ")), Some(14));
+        // Legacy `days` still works and WINS when both are present.
+        assert_eq!(parse_window_days(Some(5), None), Some(5));
+        assert_eq!(parse_window_days(Some(5), Some("30d")), Some(5));
+        // Neither / invalid / non-positive → None (caller uses the default).
+        assert_eq!(parse_window_days(None, None), None);
+        assert_eq!(parse_window_days(None, Some("abc")), None);
+        assert_eq!(parse_window_days(None, Some("0d")), None);
+        assert_eq!(parse_window_days(Some(0), Some("30d")), Some(30)); // 0 days falls through to window
+    }
+
+    /// CONTRACT (CO-518): deserialize the ACTUAL query string the bot sends
+    /// (`universe=acme&window=30d`) through the SAME `serde` path axum's
+    /// `Query<DigestQuery>` uses, and assert it resolves to a 30-day window. This
+    /// would have caught the silent-drop bug: before the fix `DigestQuery` had no
+    /// `window` field, so `window=30d` was discarded and the window stayed default.
+    #[test]
+    fn digest_query_reads_window_param_to_30_days() {
+        let q: DigestQuery =
+            serde_urlencoded::from_str("universe=acme&window=30d").expect("query parses");
+        assert_eq!(q.window.as_deref(), Some("30d"));
+        assert_eq!(q.days, None);
+        // The handler's resolution step yields a 30-day window (clamped within range).
+        let window_days = parse_window_days(q.days, q.window.as_deref())
+            .unwrap_or(DEFAULT_WINDOW_DAYS)
+            .clamp(1, MAX_WINDOW_DAYS);
+        assert_eq!(window_days, 30);
     }
 }

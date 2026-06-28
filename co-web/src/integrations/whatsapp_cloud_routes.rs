@@ -164,32 +164,46 @@ fn enqueue_inbound(msg: InboundMsg) -> bool {
     }
 }
 
-/// Pure idempotency decision (CO-489). Prunes entries older than `ttl`, then
-/// returns `true` if `wamid` is first-seen — recording it at `now` — or `false`
-/// if it was already seen within `ttl`. Takes the map by `&mut` so it is
-/// testable without any global state or a running server.
-pub fn dedup_decision(
+/// CO-496 fix: a PEEK (no side effect). Prunes entries older than `ttl`, then
+/// returns whether `wamid` was already seen within `ttl`. Recording is a SEPARATE
+/// step ([`record_wamid_seen`]) done ONLY after a successful enqueue — so a shed
+/// (queue-full) message is never marked seen and Meta's retry is still processed.
+/// Takes the map by `&mut` → testable without globals or a running server.
+pub fn wamid_is_duplicate(
     seen: &mut HashMap<String, Instant>,
     wamid: &str,
     now: Instant,
     ttl: Duration,
 ) -> bool {
     seen.retain(|_, t| now.duration_since(*t) < ttl);
-    if seen.contains_key(wamid) {
-        return false;
-    }
-    seen.insert(wamid.to_string(), now);
-    true
+    seen.contains_key(wamid)
 }
 
-/// Record `wamid` in the process-wide short-TTL seen-set and report whether it
-/// should be dispatched to the brain (first-seen → `true`; a Meta redelivery
-/// within [`WAMID_TTL`] → `false`). Thin lock around [`dedup_decision`].
-fn mark_and_check_wamid(wamid: &str) -> bool {
+/// Record `wamid` as seen at `now`. Called ONLY after a message was successfully
+/// enqueued (never on a shed), so the seen-set never poisons Meta's at-least-once
+/// retry of a dropped message. Pure → testable.
+pub fn record_wamid_seen(seen: &mut HashMap<String, Instant>, wamid: &str, now: Instant) {
+    seen.insert(wamid.to_string(), now);
+}
+
+/// The process-wide short-TTL seen-set shared by [`wamid_already_seen`] and
+/// [`record_wamid`].
+fn wamid_seen_set() -> &'static Mutex<HashMap<String, Instant>> {
     static SEEN: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
-    let seen = SEEN.get_or_init(|| Mutex::new(HashMap::new()));
-    let mut guard = seen.lock().unwrap_or_else(|e| e.into_inner());
-    dedup_decision(&mut guard, wamid, Instant::now(), WAMID_TTL)
+    SEEN.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Has `wamid` already been processed within [`WAMID_TTL`]? Peek only — does NOT
+/// record (see [`record_wamid`]).
+fn wamid_already_seen(wamid: &str) -> bool {
+    let mut guard = wamid_seen_set().lock().unwrap_or_else(|e| e.into_inner());
+    wamid_is_duplicate(&mut guard, wamid, Instant::now(), WAMID_TTL)
+}
+
+/// Record `wamid` as processed. Called only after a successful enqueue.
+fn record_wamid(wamid: &str) {
+    let mut guard = wamid_seen_set().lock().unwrap_or_else(|e| e.into_inner());
+    record_wamid_seen(&mut guard, wamid, Instant::now());
 }
 
 pub fn router() -> Router<AppState> {
@@ -263,23 +277,32 @@ async fn event_handler(headers: HeaderMap, body: Bytes) -> Response {
     // it. Spawning returns immediately, so the 200 below is still fast.
     for m in parse_inbound(&body) {
         // CO-489 idempotency: Meta is at-least-once and retries; a redelivery of
-        // the same `wamid` must NOT re-run the brain and double-send. Skip any
-        // wamid already processed within WAMID_TTL.
-        if !m.wamid.is_empty() && !mark_and_check_wamid(&m.wamid) {
+        // the same `wamid` must NOT re-run the brain and double-send. PEEK only
+        // here — skip if already processed within WAMID_TTL.
+        if !m.wamid.is_empty() && wamid_already_seen(&m.wamid) {
             tracing::info!(wamid = %m.wamid, "WhatsApp Cloud inbound: duplicate wamid, skipping");
             continue;
         }
         tracing::info!(from = %m.from, "WhatsApp Cloud inbound: {}", m.text);
 
-        // CO-496 ingress shedding: hand off to the bounded queue instead of
-        // spawning an unbounded task per message. The bounded mpsc + fixed worker
-        // pool hard-caps parked-task memory; a full queue sheds (Meta already got
-        // its 200, so the user can resend — far better than an OOM under flood).
         // CO-496: open/refresh the recipient's 24h customer-service window so a
         // later business-initiated send knows whether free-form text is allowed
         // or must fall back to an approved template.
         crate::notification_providers::note_inbound(&m.from);
-        enqueue_inbound(m);
+
+        // CO-496 ingress shedding: hand off to the bounded queue instead of
+        // spawning an unbounded task per message. A full queue sheds (Meta already
+        // got its 200, so the user can resend — far better than an OOM under flood).
+        let wamid = m.wamid.clone();
+        if enqueue_inbound(m) {
+            // CO-496 FIX: record the wamid as seen ONLY after a successful enqueue.
+            // If we recorded before enqueue, a SHED (queue-full) message would stay
+            // "seen" and Meta's retry of that dropped message would be deduped away
+            // and lost. Recording post-enqueue lets a shed message be retried.
+            if !wamid.is_empty() {
+                record_wamid(&wamid);
+            }
+        }
     }
 
     StatusCode::OK.into_response()
@@ -572,9 +595,22 @@ pub async fn link_start_handler(
     let code = compute_otp(&otp_secret(), &user_id.0, &digits, otp_bucket(now_unix()));
     let client = shared_client();
     let body = format!("Seu código de verificação CO: {code}");
-    provider.send(client, &digits, &body).await.map_err(|e| {
-        AppError::ServiceUnavailable(format!("failed to send verification code: {e}"))
-    })?;
+    // CO-496: an account-link OTP is business-initiated — the user has not messaged
+    // this number, so the 24h customer-service window is almost always CLOSED and
+    // free-form text would be rejected by Meta. Fall back to the approved OTP
+    // template (`CO_WHATSAPP_OTP_TEMPLATE`, code as its single body param) when the
+    // window is closed; inside the window free-form text is still used.
+    let template = crate::notification_providers::template_from_env(
+        "CO_WHATSAPP_OTP_TEMPLATE",
+        "CO_WHATSAPP_OTP_TEMPLATE_LANG",
+        vec![code],
+    );
+    provider
+        .send_business_initiated(client, &digits, &body, template.as_ref())
+        .await
+        .map_err(|e| {
+            AppError::ServiceUnavailable(format!("failed to send verification code: {e}"))
+        })?;
 
     // CO-491: surface the consent version the user is being asked to agree to, so
     // the agreed version is known/auditable end-to-end (the link prompt shows the
@@ -828,29 +864,75 @@ mod tests {
         let t0 = Instant::now();
         let mut seen = HashMap::new();
 
-        // First sighting → dispatch.
-        assert!(dedup_decision(&mut seen, "wamid.A", t0, ttl));
-        // Repeat within the TTL window → skip (Meta redelivery).
-        assert!(!dedup_decision(
+        // First sighting → not a duplicate; record it (mirrors enqueue success).
+        assert!(!wamid_is_duplicate(&mut seen, "wamid.A", t0, ttl));
+        record_wamid_seen(&mut seen, "wamid.A", t0);
+        // Repeat within the TTL window → duplicate (Meta redelivery).
+        assert!(wamid_is_duplicate(
             &mut seen,
             "wamid.A",
             t0 + Duration::from_secs(60),
             ttl
         ));
-        // A DIFFERENT wamid in the same window still dispatches.
-        assert!(dedup_decision(
+        // A DIFFERENT wamid in the same window is not a duplicate.
+        assert!(!wamid_is_duplicate(
             &mut seen,
             "wamid.B",
             t0 + Duration::from_secs(61),
             ttl
         ));
-        // Past the TTL the old entry is pruned, so the same wamid dispatches again.
-        assert!(dedup_decision(
+        // Past the TTL the old entry is pruned, so the same wamid is fresh again.
+        assert!(!wamid_is_duplicate(
             &mut seen,
             "wamid.A",
             t0 + Duration::from_secs(360),
             ttl
         ));
+    }
+
+    /// CO-496 FIX (the bug this regression-guards): a SHED message must NOT leave
+    /// its wamid recorded, so Meta's retry of that dropped message is processed.
+    /// Models the exact event_handler ordering: PEEK → (enqueue) → record only on
+    /// success. The original code recorded BEFORE enqueue, so a shed message's
+    /// retry was deduped away and lost forever.
+    #[test]
+    fn shed_message_wamid_not_recorded_so_retry_is_processed() {
+        let ttl = Duration::from_secs(300);
+        let t0 = Instant::now();
+        let mut seen = HashMap::new();
+        let wamid = "wamid.SHED";
+
+        // First delivery: peek says not-duplicate → we attempt enqueue.
+        assert!(!wamid_is_duplicate(&mut seen, wamid, t0, ttl));
+        // SIMULATE A SHED: enqueue returned false → we do NOT record_wamid_seen.
+
+        // Meta retries the same wamid. Because nothing was recorded, it is still
+        // NOT a duplicate → it gets processed (the bug would have dropped it here).
+        let t1 = t0 + Duration::from_secs(2);
+        assert!(
+            !wamid_is_duplicate(&mut seen, wamid, t1, ttl),
+            "a shed message must stay un-recorded so its retry is processed"
+        );
+        // This time the enqueue succeeds → record it.
+        record_wamid_seen(&mut seen, wamid, t1);
+
+        // A FURTHER redelivery is now correctly deduped (no double brain run).
+        let t2 = t1 + Duration::from_secs(2);
+        assert!(wamid_is_duplicate(&mut seen, wamid, t2, ttl));
+    }
+
+    /// The same contract through the PROCESS-WIDE seen-set (the real production
+    /// functions, unique key so it is parallel-safe). Proves the peek/record split
+    /// the event_handler relies on: peeking never records; only `record_wamid` does.
+    #[test]
+    fn process_wide_peek_does_not_record_only_explicit_record_does() {
+        let wamid = "wamid.process-wide-co496-unique";
+        // Repeated peeks never mark it seen (so a shed message stays retry-able).
+        assert!(!wamid_already_seen(wamid));
+        assert!(!wamid_already_seen(wamid));
+        // Explicit record (post-enqueue) flips it to seen.
+        record_wamid(wamid);
+        assert!(wamid_already_seen(wamid));
     }
 
     #[test]

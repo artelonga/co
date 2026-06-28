@@ -44,6 +44,60 @@ pub trait ChannelProvider: Send + Sync {
         recipient: &str,
         payload: &str,
     ) -> Result<(), String>;
+
+    /// CO-496: send a **business-initiated** message, honoring any provider-specific
+    /// 24h customer-service window. The default impl just sends free-form `text` —
+    /// correct for providers with no window constraint (Evolution self-host links
+    /// your own WhatsApp; email has no window). [`CloudApiProvider`] overrides this:
+    /// outside Meta's 24h window, free-form text is rejected, so it falls back to a
+    /// pre-approved `template` (erroring with an actionable message when none is
+    /// configured, rather than silently sending text Meta will reject).
+    async fn send_business_initiated(
+        &self,
+        client: &reqwest::Client,
+        recipient: &str,
+        text: &str,
+        _template: Option<&OutboundTemplate>,
+    ) -> Result<(), String> {
+        self.send(client, recipient, text).await
+    }
+}
+
+/// A pre-approved WhatsApp template plus the positional body params that fill its
+/// `{{1}}`, `{{2}}`, … placeholders — the only message deliverable **outside** the
+/// 24h customer-service window (CO-496). Loaded from env via [`template_from_env`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct OutboundTemplate {
+    pub name: String,
+    pub lang: String,
+    pub params: Vec<String>,
+}
+
+impl OutboundTemplate {
+    /// Clone the template (name + lang) with fresh per-recipient `params` (e.g. the
+    /// greeted user's name, or the OTP code).
+    pub fn with_params(&self, params: Vec<String>) -> Self {
+        Self {
+            name: self.name.clone(),
+            lang: self.lang.clone(),
+            params,
+        }
+    }
+}
+
+/// Load an [`OutboundTemplate`] from env: `name_var` holds the approved template
+/// name (required → `None` when unset/empty so the caller can log an actionable
+/// error), `lang_var` the BCP-47 language code (default `pt_BR`). `params` are the
+/// caller-supplied body substitutions.
+pub fn template_from_env(
+    name_var: &str,
+    lang_var: &str,
+    params: Vec<String>,
+) -> Option<OutboundTemplate> {
+    let secrets = crate::infra::secrets::global();
+    let name = secrets.get(name_var).filter(|s| !s.is_empty())?;
+    let lang = secrets.get_or(lang_var, "pt_BR");
+    Some(OutboundTemplate { name, lang, params })
 }
 
 // ---------------------------------------------------------------------------
@@ -320,6 +374,46 @@ pub fn build_template_payload(
     })
 }
 
+/// Build the Cloud API payload for a free-form `text` message — valid only inside
+/// the 24h customer-service window. Pure → unit-testable.
+pub fn build_text_payload(recipient: &str, text: &str) -> Value {
+    serde_json::json!({
+        "messaging_product": "whatsapp",
+        "recipient_type": "individual",
+        "to": recipient,
+        "type": "text",
+        "text": { "preview_url": false, "body": text },
+    })
+}
+
+/// CO-496: choose the payload for a **business-initiated** Cloud API message.
+/// Inside the window (`window_open`) free-form `text` is deliverable; outside it,
+/// only an approved `template` is. Returns `Err` (so the caller logs + aborts)
+/// when the window is closed and no template is configured — refusing to send
+/// free-form text Meta would reject. Pure → asserts the ACTUAL request shape.
+pub fn build_business_payload(
+    recipient: &str,
+    text: &str,
+    window_open: bool,
+    template: Option<&OutboundTemplate>,
+) -> Result<Value, String> {
+    if window_open {
+        return Ok(build_text_payload(recipient, text));
+    }
+    match template {
+        Some(t) => Ok(build_template_payload(
+            recipient, &t.name, &t.lang, &t.params,
+        )),
+        None => Err(
+            "CO-496: recipient is outside the 24h WhatsApp customer-service window and no \
+             approved template is configured — refusing to send free-form text (Meta would \
+             reject it). Set the template env var (e.g. CO_WHATSAPP_OTP_TEMPLATE / \
+             CO_WHATSAPP_BIRTHDAY_TEMPLATE) to send business-initiated messages."
+                .to_string(),
+        ),
+    }
+}
+
 /// Process-wide tracker of each recipient's last inbound-message time (unix secs).
 /// Drives the 24h-window decision. In-memory by design: it is a soft heuristic
 /// (a stale/empty entry just means "assume the window is closed → prefer a
@@ -393,6 +487,10 @@ pub struct CloudApiProvider {
     token: String,
     phone_number_id: String,
     graph_version: String,
+    /// Graph API base origin (default `https://graph.facebook.com`). Overridable
+    /// via `WHATSAPP_GRAPH_BASE` so the send path can be pointed at a local capture
+    /// server in tests (and at a proxy in prod if ever needed).
+    graph_base: String,
 }
 
 impl CloudApiProvider {
@@ -402,18 +500,22 @@ impl CloudApiProvider {
         let token = secrets.get("WHATSAPP_CLOUD_TOKEN")?;
         let phone_number_id = secrets.get("WHATSAPP_PHONE_NUMBER_ID")?;
         let graph_version = secrets.get_or("WHATSAPP_GRAPH_VERSION", "v21.0");
+        let graph_base = secrets.get_or("WHATSAPP_GRAPH_BASE", "https://graph.facebook.com");
         Some(Self {
             token,
             phone_number_id,
             graph_version,
+            graph_base,
         })
     }
 
     /// The Graph API messages endpoint for this WABA phone number.
     pub fn messages_url(&self) -> String {
         format!(
-            "https://graph.facebook.com/{}/{}/messages",
-            self.graph_version, self.phone_number_id
+            "{}/{}/{}/messages",
+            self.graph_base.trim_end_matches('/'),
+            self.graph_version,
+            self.phone_number_id
         )
     }
 
@@ -484,6 +586,25 @@ impl CloudApiProvider {
         let payload = build_template_payload(recipient, template_name, lang_code, params);
         self.post_payload(client, recipient, &payload).await
     }
+
+    /// CO-496: send a business-initiated message respecting the live 24h window for
+    /// `recipient`. Inside the window → free-form text; outside → the approved
+    /// `template` (or an actionable error when none is configured). This is the
+    /// production wiring of [`is_window_open`] + [`build_template_payload`].
+    pub async fn send_business_initiated_now(
+        &self,
+        client: &reqwest::Client,
+        recipient: &str,
+        text: &str,
+        template: Option<&OutboundTemplate>,
+    ) -> Result<(), String> {
+        let window_open = is_window_open(recipient);
+        let payload =
+            build_business_payload(recipient, text, window_open, template).inspect_err(|e| {
+                warn!(recipient = %recipient, "CloudApiProvider: {e}");
+            })?;
+        self.post_payload(client, recipient, &payload).await
+    }
 }
 
 #[async_trait]
@@ -499,15 +620,23 @@ impl ChannelProvider for CloudApiProvider {
         payload: &str,
     ) -> Result<(), String> {
         // Free-form text — valid only inside the 24h window (CO-496). Callers
-        // sending business-initiated messages outside it must use `send_template`.
-        let request_body = serde_json::json!({
-            "messaging_product": "whatsapp",
-            "recipient_type": "individual",
-            "to": recipient,
-            "type": "text",
-            "text": { "preview_url": false, "body": payload },
-        });
+        // sending business-initiated messages outside it must use
+        // `send_business_initiated` (which falls back to an approved template).
+        let request_body = build_text_payload(recipient, payload);
         self.post_payload(client, recipient, &request_body).await
+    }
+
+    /// CO-496: business-initiated override — outside the 24h window, fall back to an
+    /// approved template instead of free-form text Meta would reject.
+    async fn send_business_initiated(
+        &self,
+        client: &reqwest::Client,
+        recipient: &str,
+        text: &str,
+        template: Option<&OutboundTemplate>,
+    ) -> Result<(), String> {
+        self.send_business_initiated_now(client, recipient, text, template)
+            .await
     }
 }
 
@@ -552,6 +681,7 @@ mod tests {
             token: "tok".into(),
             phone_number_id: "123456".into(),
             graph_version: "v21.0".into(),
+            graph_base: "https://graph.facebook.com".into(),
         };
         assert_eq!(
             p.messages_url(),
@@ -637,6 +767,155 @@ mod tests {
         assert!(is_window_open_at(r, 100_000 + 10));
         // Past 24h → closed again.
         assert!(!is_window_open_at(r, 100_000 + SERVICE_WINDOW_SECS + 1));
+    }
+
+    // --- CO-496: business-initiated window/template fallback ---
+
+    #[test]
+    fn business_payload_is_text_inside_window_template_outside() {
+        let tpl = OutboundTemplate {
+            name: "lembrete".into(),
+            lang: "pt_BR".into(),
+            params: vec!["Yuri".into()],
+        };
+
+        // Inside the window → free-form TEXT (the actual wire shape).
+        let inside = build_business_payload("55", "oi", true, Some(&tpl)).unwrap();
+        assert_eq!(inside["type"], "text");
+        assert_eq!(inside["text"]["body"], "oi");
+
+        // Outside the window → the approved TEMPLATE, never free-form text.
+        let outside = build_business_payload("55", "oi", false, Some(&tpl)).unwrap();
+        assert_eq!(outside["type"], "template");
+        assert_eq!(outside["template"]["name"], "lembrete");
+        assert_eq!(
+            outside["template"]["components"][0]["parameters"][0]["text"],
+            "Yuri"
+        );
+    }
+
+    #[test]
+    fn business_payload_errors_outside_window_without_template() {
+        // The actionable-error path: no template configured + window closed → refuse
+        // (do NOT silently build free-form text that Meta rejects).
+        let err = build_business_payload("55", "oi", false, None).unwrap_err();
+        assert!(
+            err.contains("template"),
+            "error must name the missing config"
+        );
+    }
+
+    /// CONTRACT/INTEGRATION (CO-496): drive the REAL `CloudApiProvider` send path
+    /// against a local capture server and assert the bytes on the wire are a
+    /// `template` when the recipient is outside the 24h window. This catches a
+    /// regression to free-form text — the exact prod-rejection the fix prevents.
+    #[tokio::test]
+    async fn cloud_api_business_initiated_puts_template_on_the_wire_outside_window() {
+        use axum::{Json, Router, extract::State, routing::post};
+        use std::sync::Arc as StdArc;
+
+        let captured: StdArc<Mutex<Option<Value>>> = StdArc::new(Mutex::new(None));
+        let app = Router::new()
+            .route(
+                "/{*rest}",
+                post(
+                    |State(c): State<StdArc<Mutex<Option<Value>>>>, Json(body): Json<Value>| async move {
+                        *c.lock().unwrap() = Some(body);
+                        Json(serde_json::json!({"messages":[{"id":"wamid.OK"}]}))
+                    },
+                ),
+            )
+            .with_state(captured.clone());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        let provider = CloudApiProvider {
+            token: "tok".into(),
+            phone_number_id: "PN".into(),
+            graph_version: "v21.0".into(),
+            graph_base: format!("http://{addr}"),
+        };
+        let tpl = OutboundTemplate {
+            name: "verificacao".into(),
+            lang: "pt_BR".into(),
+            params: vec!["123456".into()],
+        };
+        // A fresh recipient we NEVER note_inbound for → window closed.
+        let recipient = "5541900000496";
+        provider
+            .send_business_initiated_now(
+                shared_client_for_test(),
+                recipient,
+                "free-form would be rejected",
+                Some(&tpl),
+            )
+            .await
+            .unwrap();
+
+        let body = captured
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("server got a request");
+        assert_eq!(
+            body["type"], "template",
+            "outside the 24h window the wire payload MUST be a template, not free-form text"
+        );
+        assert_eq!(body["template"]["name"], "verificacao");
+        assert_eq!(body["to"], recipient);
+    }
+
+    /// Companion to the above: inside the window the SAME path puts free-form text
+    /// on the wire (so the template fallback is genuinely window-gated, not always-on).
+    #[tokio::test]
+    async fn cloud_api_business_initiated_puts_text_on_the_wire_inside_window() {
+        use axum::{Json, Router, extract::State, routing::post};
+        use std::sync::Arc as StdArc;
+
+        let captured: StdArc<Mutex<Option<Value>>> = StdArc::new(Mutex::new(None));
+        let app = Router::new()
+            .route(
+                "/{*rest}",
+                post(
+                    |State(c): State<StdArc<Mutex<Option<Value>>>>, Json(body): Json<Value>| async move {
+                        *c.lock().unwrap() = Some(body);
+                        Json(serde_json::json!({"messages":[{"id":"wamid.OK"}]}))
+                    },
+                ),
+            )
+            .with_state(captured.clone());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        let provider = CloudApiProvider {
+            token: "tok".into(),
+            phone_number_id: "PN".into(),
+            graph_version: "v21.0".into(),
+            graph_base: format!("http://{addr}"),
+        };
+        let recipient = "5541900000497";
+        // Open the window for this recipient → free-form is allowed.
+        note_inbound(recipient);
+        provider
+            .send_business_initiated_now(shared_client_for_test(), recipient, "olá!", None)
+            .await
+            .unwrap();
+
+        let body = captured
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("server got a request");
+        assert_eq!(body["type"], "text");
+        assert_eq!(body["text"]["body"], "olá!");
+    }
+
+    /// A process-wide reqwest client for the integration tests above.
+    fn shared_client_for_test() -> &'static reqwest::Client {
+        static C: OnceLock<reqwest::Client> = OnceLock::new();
+        C.get_or_init(reqwest::Client::new)
     }
 
     // --- template rendering ---
