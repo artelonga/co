@@ -55,7 +55,7 @@ base64 = "0.22"
 lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "tokio1-rustls-tls", "builder"] }
 parking_lot = "0.12"
 maxminddb = "0.24"
-nix = { version = "0.28", features = ["fs"] }
+nix = { version = "0.28", features = ["fs", "resource"] }
 opentelemetry = { version = "0.26", features = ["trace"] }
 opentelemetry_sdk = { version = "0.26", features = ["rt-tokio"] }
 opentelemetry-otlp = { version = "0.26", features = ["tonic"] }

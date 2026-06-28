@@ -393,8 +393,15 @@ fn resolve_scoped<C: Capability>(parts: &Parts, state: &AppState) -> Result<Scop
     }
 
     // API token: enforce the capability (or inherit the owner's tier on NULL).
-    let storage = state.core.storage.lock();
-    let Some(tok) = storage.get_api_token_by_value(&token).ok().flatten() else {
+    // The token lookup itself bumps `last_used_at`, so it must hold the write
+    // lock; the lock is dropped immediately after so the (read-only) owner-tier
+    // check below runs on the CO-496 concurrent read pool instead of serializing
+    // the whole auth path behind the global mutex.
+    let tok = {
+        let storage = state.core.storage.lock();
+        storage.get_api_token_by_value(&token).ok().flatten()
+    };
+    let Some(tok) = tok else {
         return Err(unauthorized("Invalid or expired token"));
     };
 
@@ -414,9 +421,12 @@ fn resolve_scoped<C: Capability>(parts: &Parts, state: &AppState) -> Result<Scop
             }
         }
         None => {
-            // NULL scopes → inherit owner tier (pre-CO-448 behavior).
+            // NULL scopes → inherit owner tier (pre-CO-448 behavior). CO-496:
+            // read the owner off the concurrent read pool (no write-lock contention).
             if C::ADMIN_SURFACE {
-                let owner_is_admin = storage
+                let owner_is_admin = state
+                    .core
+                    .meta_reads
                     .get_user_by_id(&tok.user_id)
                     .map(|u| u.tier == "admin")
                     .unwrap_or(false);

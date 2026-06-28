@@ -92,6 +92,10 @@ pub struct Storage {
     // can drive the connection directly. External callers use `conn()`.
     pub(crate) conn: Connection,
     pub universe_pool: Arc<UniversePool>,
+    /// CO-496: concurrent read pool over `meta.db` for the auth-lookup hot path.
+    /// Cloned (Arc) onto `CoreState` so handlers read users/ownership rows
+    /// without contending on the global write `Mutex<Storage>`.
+    pub read_pool: Arc<crate::storage::read_pool::MetaReadPool>,
     pub data_dir: PathBuf,
 }
 
@@ -121,11 +125,47 @@ impl Storage {
         conn.execute_batch("PRAGMA foreign_keys=ON;")
             .expect("Failed to enable foreign keys");
 
-        let universe_pool = Arc::new(UniversePool::new(data_dir.as_ref(), 1000));
+        // CO-496: size the per-universe pool from the file-descriptor budget.
+        // Raise RLIMIT_NOFILE toward the hard limit first, then derive the
+        // capacity from the resulting soft limit (a 1000-slot pool on a 1024-fd
+        // box would exhaust the descriptor table). `CO_UNIVERSE_POOL_CAPACITY`
+        // overrides the derived value for operators who know their box.
+        const DEFAULT_UNIVERSE_POOL_CAPACITY: usize = 1000;
+        let soft_nofile = crate::fd_limit::raise_nofile().map(|(soft, _)| soft);
+        let pool_cap_override = {
+            use crate::infra::secrets::SecretsProviderExt;
+            let n =
+                crate::infra::secrets::global().get_parsed::<usize>("CO_UNIVERSE_POOL_CAPACITY", 0);
+            (n > 0).then_some(n)
+        };
+        let universe_capacity = crate::fd_limit::pool_capacity(
+            pool_cap_override,
+            soft_nofile,
+            DEFAULT_UNIVERSE_POOL_CAPACITY,
+        );
+        tracing::info!(
+            capacity = universe_capacity,
+            soft_nofile = ?soft_nofile,
+            "CO-496: universe pool sized from fd budget"
+        );
+        let universe_pool = Arc::new(UniversePool::new(data_dir.as_ref(), universe_capacity));
+
+        // CO-496: concurrent read pool over meta.db. The db file already exists
+        // (Connection::open above created it) and WAL is enabled, so read-only
+        // connections can attach safely; typed lookups only run at request time,
+        // long after migrations below populate the schema.
+        let read_pool_size = crate::storage::read_pool::parse_pool_size(
+            crate::infra::secrets::global().get("CO_META_READ_POOL_SIZE"),
+        );
+        let read_pool = Arc::new(crate::storage::read_pool::MetaReadPool::open(
+            data_dir.as_ref(),
+            read_pool_size,
+        ));
 
         let mut storage = Self {
             conn,
             universe_pool,
+            read_pool,
             data_dir: data_dir.as_ref().to_path_buf(),
         };
         // CO-446: migrations now degrade to a readable error instead of panicking
@@ -219,6 +259,7 @@ pub(crate) mod onboarding;
 pub(crate) mod projects;
 pub mod push_subscriptions;
 pub(crate) mod quilombo_bridge;
+pub mod read_pool;
 pub(crate) mod recompute;
 pub(crate) mod release_notes;
 pub(crate) mod sala_scope;

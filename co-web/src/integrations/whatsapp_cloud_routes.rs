@@ -33,7 +33,6 @@ use axum::{
     routing::{get, post},
 };
 use serde::Deserialize;
-use tokio::sync::Semaphore;
 
 use crate::error::AppError;
 use crate::server::AppState;
@@ -82,17 +81,87 @@ pub fn parse_reply_concurrency(raw: Option<String>) -> usize {
         .unwrap_or(DEFAULT_REPLY_CONCURRENCY)
 }
 
-/// Process-wide semaphore bounding concurrent inbound replies. Sized once from
-/// `CO_WHATSAPP_REPLY_CONCURRENCY` (default [`DEFAULT_REPLY_CONCURRENCY`]).
-fn reply_semaphore() -> Arc<Semaphore> {
-    static SEM: OnceLock<Arc<Semaphore>> = OnceLock::new();
-    SEM.get_or_init(|| {
-        let n = parse_reply_concurrency(
+// ---------------------------------------------------------------------------
+// CO-496 — ingress shedding (tier-3)
+// ---------------------------------------------------------------------------
+//
+// Tier-2 (CO-489) bounded the number of *in-flight* brain hops with a semaphore,
+// but the webhook still `tokio::spawn`ed one task PER inbound message before that
+// permit was acquired — so a flood/redelivery storm parked an unbounded number of
+// pending tasks (each holding the message + a future) in memory. Tier-3 replaces
+// that with a **bounded mpsc + a fixed worker pool**: the webhook `try_send`s and
+// *sheds* (drops + logs) when the queue is full, so parked-task memory is hard-
+// bounded by `workers + queue_capacity` regardless of the inbound rate. Meta has
+// already received its 200, so a shed message is simply not answered (the user can
+// resend) — far better than an OOM under flood.
+
+/// Default bound on inbound messages parked waiting for a reply worker. Override
+/// with `CO_WHATSAPP_INGRESS_QUEUE`.
+const DEFAULT_INGRESS_QUEUE: usize = 256;
+
+/// Parse the ingress-queue capacity from the env value, falling back to
+/// [`DEFAULT_INGRESS_QUEUE`] when unset/empty/non-numeric/zero. Pure → testable.
+pub fn parse_ingress_queue(raw: Option<String>) -> usize {
+    raw.and_then(|s| s.trim().parse::<usize>().ok())
+        .filter(|&n| n > 0)
+        .unwrap_or(DEFAULT_INGRESS_QUEUE)
+}
+
+/// Lazily-started bounded ingress queue. A fixed pool of `workers` tasks (sized
+/// from `CO_WHATSAPP_REPLY_CONCURRENCY`) drains a channel of capacity
+/// `CO_WHATSAPP_INGRESS_QUEUE`; the workers ARE the concurrency bound (they
+/// replace the tier-2 semaphore). Returns the cloneable sender.
+fn ingress_sender() -> &'static tokio::sync::mpsc::Sender<InboundMsg> {
+    static TX: OnceLock<tokio::sync::mpsc::Sender<InboundMsg>> = OnceLock::new();
+    TX.get_or_init(|| {
+        let capacity =
+            parse_ingress_queue(crate::infra::secrets::global().get("CO_WHATSAPP_INGRESS_QUEUE"));
+        let workers = parse_reply_concurrency(
             crate::infra::secrets::global().get("CO_WHATSAPP_REPLY_CONCURRENCY"),
         );
-        Arc::new(Semaphore::new(n))
+        let (tx, rx) = tokio::sync::mpsc::channel::<InboundMsg>(capacity);
+        // Shared receiver: at most one worker awaits `recv` at a time; the rest are
+        // busy in `reply_to` (off-lock), so up to `workers` replies run concurrently.
+        let rx = Arc::new(tokio::sync::Mutex::new(rx));
+        for _ in 0..workers {
+            let rx = Arc::clone(&rx);
+            tokio::spawn(async move {
+                loop {
+                    let msg = {
+                        let mut guard = rx.lock().await;
+                        guard.recv().await
+                    };
+                    let Some(msg) = msg else { break }; // channel closed
+                    if let Err(e) = reply_to(&msg).await {
+                        tracing::warn!(from = %msg.from, "WhatsApp Cloud reply failed: {e}");
+                    }
+                }
+            });
+        }
+        tracing::info!(
+            capacity,
+            workers,
+            "CO-496: WhatsApp ingress queue started (bounded shed)"
+        );
+        tx
     })
-    .clone()
+}
+
+/// Hand an inbound message to the bounded ingress queue. Returns `false` (shed)
+/// when the queue is full or closed, hard-bounding parked-task memory under flood.
+fn enqueue_inbound(msg: InboundMsg) -> bool {
+    use tokio::sync::mpsc::error::TrySendError;
+    match ingress_sender().try_send(msg) {
+        Ok(()) => true,
+        Err(TrySendError::Full(m)) => {
+            tracing::warn!(from = %m.from, "CO-496: WhatsApp ingress queue full — shedding inbound message");
+            false
+        }
+        Err(TrySendError::Closed(m)) => {
+            tracing::error!(from = %m.from, "CO-496: WhatsApp ingress queue closed — dropping inbound message");
+            false
+        }
+    }
 }
 
 /// Pure idempotency decision (CO-489). Prunes entries older than `ttl`, then
@@ -202,17 +271,15 @@ async fn event_handler(headers: HeaderMap, body: Bytes) -> Response {
         }
         tracing::info!(from = %m.from, "WhatsApp Cloud inbound: {}", m.text);
 
-        // CO-489 bounded concurrency: acquire a process-wide permit before the
-        // brain hop so bursts/redeliveries fronting the single local model can't
-        // pile up unbounded tasks. The task still runs (Meta already got its 200);
-        // it just waits its turn, capping in-flight brain hops.
-        let sem = reply_semaphore();
-        tokio::spawn(async move {
-            let _permit = sem.acquire_owned().await;
-            if let Err(e) = reply_to(&m).await {
-                tracing::warn!(from = %m.from, "WhatsApp Cloud reply failed: {e}");
-            }
-        });
+        // CO-496 ingress shedding: hand off to the bounded queue instead of
+        // spawning an unbounded task per message. The bounded mpsc + fixed worker
+        // pool hard-caps parked-task memory; a full queue sheds (Meta already got
+        // its 200, so the user can resend — far better than an OOM under flood).
+        // CO-496: open/refresh the recipient's 24h customer-service window so a
+        // later business-initiated send knows whether free-form text is allowed
+        // or must fall back to an approved template.
+        crate::notification_providers::note_inbound(&m.from);
+        enqueue_inbound(m);
     }
 
     StatusCode::OK.into_response()
@@ -805,6 +872,37 @@ mod tests {
         assert_eq!(
             parse_reply_concurrency(Some("0".into())),
             DEFAULT_REPLY_CONCURRENCY
+        );
+    }
+
+    // --- CO-496: ingress shedding ----------------------------------------
+
+    #[test]
+    fn ingress_queue_parses_from_env_with_default() {
+        assert_eq!(parse_ingress_queue(None), DEFAULT_INGRESS_QUEUE);
+        assert_eq!(parse_ingress_queue(Some("512".into())), 512);
+        assert_eq!(parse_ingress_queue(Some("  64 ".into())), 64);
+        // Invalid / empty / zero → default (never a 0-capacity queue).
+        assert_eq!(
+            parse_ingress_queue(Some(String::new())),
+            DEFAULT_INGRESS_QUEUE
+        );
+        assert_eq!(
+            parse_ingress_queue(Some("abc".into())),
+            DEFAULT_INGRESS_QUEUE
+        );
+        assert_eq!(parse_ingress_queue(Some("0".into())), DEFAULT_INGRESS_QUEUE);
+    }
+
+    #[tokio::test]
+    async fn bounded_channel_sheds_when_full() {
+        // The core ingress invariant: once the bounded queue is full, `try_send`
+        // sheds instead of growing parked-task memory (mirrors `enqueue_inbound`).
+        let (tx, _rx) = tokio::sync::mpsc::channel::<u8>(1);
+        assert!(tx.try_send(1).is_ok(), "first send fills capacity");
+        assert!(
+            tx.try_send(2).is_err(),
+            "a full bounded queue must shed the next message"
         );
     }
 

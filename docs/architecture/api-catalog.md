@@ -684,6 +684,9 @@ in-handler (ungated, like the billing webhook); the link + chat routes sit behin
 | POST | `/api/v1/whatsapp/link/verify` | authed | CO-490 — verify OTP, link number + mint scoped token (whatsapp_cloud_routes.rs) |
 | GET | `/api/v1/whatsapp/consent` | anon | CO-491 — deterministic versioned consent text (`{operator}` substitution) (whatsapp_consent.rs) |
 | GET | `/api/v1/whatsapp/telemetry/digest` | telemetry:read | CO-499 — lead-temperature digest, named-vs-aggregate (lead_digest.rs) |
+| GET | `/api/v1/whatsapp/me/export` | authed | CO-492 — portable bundle of the caller's curated content + consent (whatsapp_me.rs) |
+| POST | `/api/v1/whatsapp/me/erase` | authed | CO-492 — erase caller's curated content (confirmation token required) (whatsapp_me.rs) |
+| POST | `/api/v1/whatsapp/me/forget` | authed | CO-492 — full forget: content + link + consent (whatsapp_me.rs) |
 
 ---
 
