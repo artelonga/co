@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-496",
+  "title": "Tier-3 scalability — hosted/GPU inference, meta.db read pool, indexes, ingress shedding",
+  "type": "user-story",
+  "status": "in_progress",
+  "semver_bump": null,
+  "spec_path": "work/co/CO-496.md",
+  "branch": "feat/CO-496-tier3",
+  "merge_sha": "d95df8f2c2f931117d65a4467bb55d0837c0345a",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/319",
+    "number": 319
+  },
+  "started_at": "2026-06-27T00:00:00Z",
+  "merged_at": "2026-06-28T11:33:50Z",
+  "files_changed": 17,
+  "lines_added": 1054,
+  "lines_removed": 50,
+  "labels": [
+    "perf",
+    "whatsapp",
+    "scalability"
+  ],
+  "changelog_entry": "## CO-496 — Tier-3 scalability hardening\n\nPushes the platform past the tier-2 envelope on the paths that bind under load:\n\n- **meta.db concurrent read pool** (`storage/read_pool.rs`, `MetaReadPool` in `server/state`): the auth hot path (token lookup → owner-tier check) now reads users/ownership rows off a concurrent read pool instead of serializing the whole auth path behind the global write `Mutex<Storage>`.\n- **Ingress shedding** (`integrations/whatsapp_cloud_routes.rs`): the inbound webhook replaced its unbounded `spawn`-per-message with a **bounded mpsc + fixed worker pool** — under a flood/redelivery storm it sheds (drops + logs) when the queue is full, so parked-task memory is hard-bounded by `workers + queue_capacity` (Meta already has its 200; a shed message is simply not answered).\n- **Cloud API at scale** (`social/notification_providers.rs`): tracks Meta's 24-hour customer-service window (free-form text vs template fallback) per recipient and computes a polite `429`/`Retry-After` backoff so the number isn't throttled harder.\n- **fd-limit raise** (`platform/fd_limit.rs`): lifts the file-descriptor soft limit at boot (more concurrent connections/pool handles).\n- **v095** migration: indexes backing the read-pool hot paths.\n\n### Why\nTier-2 (CO-489) bounded in-flight work but left unbounded parked tasks and a single\nwrite-locked auth path. Tier-3 makes degradation graceful under real load.",
+  "summary": "GIVEN the scalability review found the single local model is the binding constraint (~2 msg/min sustained, ~5 concurrent) and tier-2 makes that *graceful* but does not *raise* it, WHEN we need hundred",
+  "co_auto_version": "0.1.0"
+}
