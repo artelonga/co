@@ -49,6 +49,9 @@ mod v092;
 // NOTE: feat/CO-488 also defines `mod v094`; the collision is intentional (loud
 // duplicate-`mod` error at merge → renumber-the-second to v095). See v094.rs header.
 mod v094;
+// CO-496: tier-3 auth/ownership indexes (idx_users_whatsapp, idx_universes_owner,
+// idx_universe_members_user). Claims v095 = max + 1 per the version-claim protocol.
+mod v095;
 
 /// CO-446: minimum free bytes required on the data volume before the boot path
 /// runs migrations. Default 200 MiB. Override with `CO_MIGRATION_MIN_FREE_BYTES`.
@@ -195,6 +198,7 @@ impl Storage {
             self.migrate_v092(current_version);
             self.migrate_v093(current_version);
             self.migrate_v094(current_version);
+            self.migrate_v095(current_version);
         })
         .inspect_err(|e| {
             tracing::error!(
@@ -321,6 +325,7 @@ mod co446_disk_full_tests {
         let mut storage = Storage {
             conn,
             universe_pool: Arc::new(UniversePool::new(tmp.path(), 16)),
+            read_pool: Arc::new(crate::storage::read_pool::MetaReadPool::open(tmp.path(), 2)),
             data_dir: tmp.path().to_path_buf(),
         };
 
@@ -344,7 +349,7 @@ mod tests {
     /// Latest migration version applied by the aggregated runner. Bump this in
     /// lockstep with the highest `if current_version < N` block (version-claim
     /// protocol) so the split stays anchored to the real schema.
-    const LATEST_VERSION: i64 = 94;
+    const LATEST_VERSION: i64 = 95;
 
     fn max_version(storage: &Storage) -> i64 {
         storage

@@ -277,6 +277,11 @@ CREATE TABLE IF NOT EXISTS entry_embeddings (
 CREATE INDEX IF NOT EXISTS idx_emb_body_hash ON entry_embeddings(body_hash);
 ";
 
+/// CO-496: the highest per-universe `schema_version` this binary applies. Keep in
+/// lockstep with the highest `if v < N` block in [`run_universe_migrations`]; the
+/// cold-open fast path returns early once a `data.db` has reached it.
+const LATEST_UNIVERSE_SCHEMA_VERSION: i64 = 19;
+
 // ---------------------------------------------------------------------------
 // UniversePool
 // ---------------------------------------------------------------------------
@@ -402,8 +407,23 @@ impl UniversePool {
             std::fs::create_dir_all(parent).map_err(|e| PoolError::new(key, "mkdir", e))?;
         }
         let conn = Connection::open(&db_path).map_err(|e| PoolError::new(key, "open", e))?;
-        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
-            .map_err(|e| PoolError::new(key, "pragmas", e))?;
+        // CO-496: explicit per-connection tuning.
+        // - WAL: concurrent readers alongside one writer (no reader/writer block).
+        // - foreign_keys: integrity.
+        // - cache_size=-8000: 8 MiB page cache per hot universe (negative ⇒ KiB),
+        //   up from SQLite's 2 MiB default — fewer page re-reads on the working set.
+        // - mmap_size=134217728: memory-map up to 128 MiB of the DB so reads avoid
+        //   a syscall+copy per page (no-op where mmap is unsupported).
+        // - busy_timeout=5000: wait up to 5 s for a transient writer lock instead
+        //   of returning SQLITE_BUSY immediately under burst.
+        conn.execute_batch(
+            "PRAGMA journal_mode=WAL; \
+             PRAGMA foreign_keys=ON; \
+             PRAGMA cache_size=-8000; \
+             PRAGMA mmap_size=134217728; \
+             PRAGMA busy_timeout=5000;",
+        )
+        .map_err(|e| PoolError::new(key, "pragmas", e))?;
         run_universe_migrations(&conn, key).map_err(|e| PoolError::new(key, "migrations", e))?;
         Ok(conn)
     }
@@ -511,6 +531,17 @@ fn run_universe_migrations(conn: &Connection, universe_key: &str) -> rusqlite::R
             |r| r.get(0),
         )
         .unwrap_or(0);
+
+    // CO-496: gate the cold-open migration scans behind the schema_version check.
+    // A fully-migrated `data.db` (v >= LATEST) re-ran every `ensure_universe_column`
+    // drift guard (a `pragma_table_info` scan per column) and the body-metrics
+    // backfill `SELECT … WHERE body_chars = 0` on EVERY pool open/eviction. On a
+    // box with many hot universes those scans dominate cold-open latency. Once the
+    // DB is at the latest version there is nothing left to apply, so return early
+    // after the cheap idempotent `UNIVERSE_SCHEMA` batch above.
+    if v >= LATEST_UNIVERSE_SCHEMA_VERSION {
+        return Ok(());
+    }
 
     if v < 1 {
         conn.execute("INSERT INTO schema_version (version) VALUES (1)", [])?;
@@ -1078,6 +1109,34 @@ mod time_migration_tests {
             )
             .unwrap();
         assert_eq!(idx, 1, "v19 must create idx_entries_event_ms");
+    }
+
+    /// CO-496: once a `data.db` is at the latest version the cold-open fast path
+    /// returns before the unconditional drift guards and the body-metrics
+    /// backfill scan. Proof: plant a row the backfill *would* fix (non-empty body,
+    /// `body_chars = 0`); after a re-open it is left untouched because the scan was
+    /// skipped.
+    #[test]
+    fn co496_fast_path_skips_backfill_scan_at_latest_version() {
+        let conn = Connection::open_in_memory().unwrap();
+        run_universe_migrations(&conn, "uni").unwrap(); // fresh DB → reaches latest
+
+        conn.execute(
+            "INSERT INTO entries (universe_key, path, entry_type, body, body_chars) \
+             VALUES ('uni', 'n.md', 'note', 'hello', 0)",
+            [],
+        )
+        .unwrap();
+
+        // Re-open at the latest version: the fast path returns early, so the
+        // backfill SELECT never runs and body_chars stays 0.
+        run_universe_migrations(&conn, "uni").unwrap();
+        let chars: i64 = conn
+            .query_row("SELECT body_chars FROM entries WHERE path='n.md'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(chars, 0, "fast path must skip the body-metrics backfill scan");
     }
 
     /// Fresh databases get the ms columns from the base schema and the

@@ -15,6 +15,7 @@ pub mod embedding_worker;
 pub mod error;
 pub mod events;
 pub mod experiment;
+pub mod fd_limit;
 pub mod geo;
 pub mod index_manager;
 pub mod job_queue;

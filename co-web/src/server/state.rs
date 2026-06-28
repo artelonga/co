@@ -13,6 +13,10 @@ use crate::storage::Storage;
 pub struct CoreState {
     pub storage: Arc<parking_lot::Mutex<Storage>>,
     pub storage_trait: Arc<dyn crate::infra::storage::Storage>,
+    /// CO-496: concurrent read pool over `meta.db` (shares the Arc with
+    /// `Storage::read_pool`). The auth-lookup hot path reads users/ownership rows
+    /// here without taking the global write `Mutex<Storage>` above.
+    pub meta_reads: Arc<crate::storage::read_pool::MetaReadPool>,
     pub config: crate::config::WebConfig,
     /// CO-434: non-secret server config, populated once at boot from `secrets`.
     /// Subsystems read tunables here instead of calling `std::env::var` at the
@@ -92,6 +96,8 @@ impl CoreState {
         secrets: Arc<dyn crate::infra::secrets::SecretsProvider>,
         blob_backend: crate::infra::blob::BlobBackend,
     ) -> Self {
+        // CO-496: share the read pool Arc before moving storage behind the mutex.
+        let meta_reads = Arc::clone(&storage.read_pool);
         let storage = Arc::new(parking_lot::Mutex::new(storage));
         let storage_trait: Arc<dyn crate::infra::storage::Storage> = Arc::new(
             crate::infra::storage::SqliteStorage::from_arc(Arc::clone(&storage)),
@@ -109,6 +115,7 @@ impl CoreState {
         Self {
             storage,
             storage_trait,
+            meta_reads,
             config,
             server_config,
             auth_store: Mutex::new(auth_store),

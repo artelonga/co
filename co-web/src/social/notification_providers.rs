@@ -19,6 +19,10 @@
 //!
 //! Substitution uses `{{key}}` placeholders resolved from the event payload.
 
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
+use std::time::Duration;
+
 use async_trait::async_trait;
 use serde_json::Value;
 use tracing::{info, warn};
@@ -237,6 +241,131 @@ impl ChannelProvider for EvolutionApiProvider {
 }
 
 // ---------------------------------------------------------------------------
+// CO-496 — Cloud API at scale: 24h window, template fallback, 429 backoff
+// ---------------------------------------------------------------------------
+//
+// Meta's WhatsApp Cloud API has two scaling constraints the tier-3 review called
+// out:
+//   1. The 24-hour customer-service window: free-form `text` is only deliverable
+//      within 24h of the recipient's last inbound message. Business-initiated
+//      messages outside it MUST use a pre-approved **template**.
+//   2. Rate limits: the API replies `429` (with a `Retry-After`) when the number
+//      is sending faster than its messaging tier (250 → 1k → 10k → 100k/day)
+//      allows. Hammering through a 429 gets the number throttled harder.
+// These helpers track the window per recipient and compute a polite backoff.
+
+/// The customer-service window: free-form text is deliverable for this long after
+/// the recipient's last inbound message. 24h, in seconds.
+pub const SERVICE_WINDOW_SECS: u64 = 24 * 60 * 60;
+
+/// Max attempts (initial + retries) for a Cloud API send before giving up on 429.
+const MAX_SEND_ATTEMPTS: u32 = 3;
+/// Ceiling on any single backoff sleep, so one throttled worker can't park for an
+/// unbounded `Retry-After`.
+const MAX_BACKOFF_SECS: u64 = 30;
+
+/// Is the 24h customer-service window still open? Pure → unit-testable. Saturating
+/// so a clock skew (now < last) is treated as "just received" (open).
+pub fn within_service_window(last_inbound_unix: u64, now_unix: u64) -> bool {
+    now_unix.saturating_sub(last_inbound_unix) < SERVICE_WINDOW_SECS
+}
+
+/// Parse a `Retry-After` header value. Supports the delta-seconds form (the only
+/// form Meta emits). Returns `None` for absent/malformed values. Pure → testable.
+pub fn parse_retry_after(value: Option<&str>) -> Option<Duration> {
+    value
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .map(Duration::from_secs)
+}
+
+/// The delay before retrying a 429: honor `Retry-After` when present, else
+/// exponential backoff (1s, 2s, 4s, …), always capped at [`MAX_BACKOFF_SECS`].
+/// Pure → unit-testable.
+pub fn backoff_delay(retry_after: Option<Duration>, attempt: u32) -> Duration {
+    let secs = match retry_after {
+        Some(d) => d.as_secs(),
+        None => 1u64 << attempt.min(6), // 1,2,4,…,64 before the cap
+    };
+    Duration::from_secs(secs.min(MAX_BACKOFF_SECS))
+}
+
+/// Build the Cloud API payload for an **approved template** message — the only
+/// thing deliverable outside the 24h window. `params` fill the body component's
+/// positional `{{1}}`, `{{2}}`, … placeholders. Pure → unit-testable.
+pub fn build_template_payload(
+    recipient: &str,
+    template_name: &str,
+    lang_code: &str,
+    params: &[String],
+) -> Value {
+    let components = if params.is_empty() {
+        serde_json::json!([])
+    } else {
+        let parameters: Vec<Value> = params
+            .iter()
+            .map(|p| serde_json::json!({ "type": "text", "text": p }))
+            .collect();
+        serde_json::json!([{ "type": "body", "parameters": parameters }])
+    };
+    serde_json::json!({
+        "messaging_product": "whatsapp",
+        "recipient_type": "individual",
+        "to": recipient,
+        "type": "template",
+        "template": {
+            "name": template_name,
+            "language": { "code": lang_code },
+            "components": components,
+        },
+    })
+}
+
+/// Process-wide tracker of each recipient's last inbound-message time (unix secs).
+/// Drives the 24h-window decision. In-memory by design: it is a soft heuristic
+/// (a stale/empty entry just means "assume the window is closed → prefer a
+/// template"), so it need not survive a restart.
+fn recipient_windows() -> &'static Mutex<HashMap<String, u64>> {
+    static W: OnceLock<Mutex<HashMap<String, u64>>> = OnceLock::new();
+    W.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Record that `recipient` sent us an inbound message at `now_unix` (opens/refreshes
+/// their 24h window). Prunes entries older than the window so the map stays bounded
+/// by the count of *recently-active* recipients.
+pub fn note_inbound_at(recipient: &str, now_unix: u64) {
+    let mut map = recipient_windows().lock().unwrap_or_else(|e| e.into_inner());
+    map.retain(|_, &mut t| within_service_window(t, now_unix));
+    map.insert(recipient.to_string(), now_unix);
+}
+
+/// Is `recipient`'s 24h free-form window currently open? `false` when we have no
+/// record of a recent inbound (→ caller should fall back to an approved template).
+pub fn is_window_open_at(recipient: &str, now_unix: u64) -> bool {
+    let map = recipient_windows().lock().unwrap_or_else(|e| e.into_inner());
+    map.get(recipient)
+        .map(|&t| within_service_window(t, now_unix))
+        .unwrap_or(false)
+}
+
+/// Current unix time in seconds.
+fn now_unix() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// Public entry used by the inbound webhook to open/refresh a recipient's window.
+pub fn note_inbound(recipient: &str) {
+    note_inbound_at(recipient, now_unix());
+}
+
+/// Public entry: is free-form text deliverable to `recipient` right now?
+pub fn is_window_open(recipient: &str) -> bool {
+    is_window_open_at(recipient, now_unix())
+}
+
+// ---------------------------------------------------------------------------
 // CloudApiProvider (CO-479) — official WhatsApp Business Platform (Cloud API)
 // ---------------------------------------------------------------------------
 
@@ -283,6 +412,74 @@ impl CloudApiProvider {
             self.graph_version, self.phone_number_id
         )
     }
+
+    /// POST an already-built JSON payload to the messages endpoint, honoring
+    /// `429 Too Many Requests` with a bounded `Retry-After`/exponential backoff
+    /// (CO-496). Shared by free-form [`ChannelProvider::send`] and
+    /// [`send_template`](Self::send_template).
+    async fn post_payload(
+        &self,
+        client: &reqwest::Client,
+        recipient: &str,
+        payload: &Value,
+    ) -> Result<(), String> {
+        for attempt in 0..MAX_SEND_ATTEMPTS {
+            let resp = client
+                .post(self.messages_url())
+                .header("Authorization", format!("Bearer {}", self.token))
+                .header("Content-Type", "application/json")
+                .json(payload)
+                .send()
+                .await
+                .map_err(|e| format!("WhatsApp Cloud API request failed: {e}"))?;
+
+            let status = resp.status();
+            if status.is_success() {
+                info!(recipient = %recipient, "CloudApiProvider: WhatsApp message delivered");
+                return Ok(());
+            }
+
+            // CO-496: honor 429 backoff — Retry-After if present, else capped
+            // exponential. Retrying past a 429 without backing off gets the number
+            // throttled harder, so this is mandatory at scale.
+            if status.as_u16() == 429 && attempt + 1 < MAX_SEND_ATTEMPTS {
+                let retry_after = parse_retry_after(
+                    resp.headers()
+                        .get(reqwest::header::RETRY_AFTER)
+                        .and_then(|v| v.to_str().ok()),
+                );
+                let delay = backoff_delay(retry_after, attempt);
+                warn!(
+                    recipient = %recipient,
+                    attempt,
+                    delay_secs = delay.as_secs(),
+                    "CloudApiProvider: 429 rate-limited — backing off"
+                );
+                tokio::time::sleep(delay).await;
+                continue;
+            }
+
+            let text = resp.text().await.unwrap_or_default();
+            warn!(recipient = %recipient, status = %status, body = %text, "CloudApiProvider: delivery failed");
+            return Err(format!("WhatsApp Cloud API {status}: {text}"));
+        }
+        Err("WhatsApp Cloud API: exhausted retries after repeated 429".to_string())
+    }
+
+    /// Send an **approved template** message — the channel for business-initiated
+    /// messages outside the 24h customer-service window (CO-496). `params` fill the
+    /// template body's positional placeholders. Same 429 backoff as `send`.
+    pub async fn send_template(
+        &self,
+        client: &reqwest::Client,
+        recipient: &str,
+        template_name: &str,
+        lang_code: &str,
+        params: &[String],
+    ) -> Result<(), String> {
+        let payload = build_template_payload(recipient, template_name, lang_code, params);
+        self.post_payload(client, recipient, &payload).await
+    }
 }
 
 #[async_trait]
@@ -297,6 +494,8 @@ impl ChannelProvider for CloudApiProvider {
         recipient: &str,
         payload: &str,
     ) -> Result<(), String> {
+        // Free-form text — valid only inside the 24h window (CO-496). Callers
+        // sending business-initiated messages outside it must use `send_template`.
         let request_body = serde_json::json!({
             "messaging_product": "whatsapp",
             "recipient_type": "individual",
@@ -304,25 +503,7 @@ impl ChannelProvider for CloudApiProvider {
             "type": "text",
             "text": { "preview_url": false, "body": payload },
         });
-
-        let resp = client
-            .post(self.messages_url())
-            .header("Authorization", format!("Bearer {}", self.token))
-            .header("Content-Type", "application/json")
-            .json(&request_body)
-            .send()
-            .await
-            .map_err(|e| format!("WhatsApp Cloud API request failed: {e}"))?;
-
-        if resp.status().is_success() {
-            info!(recipient = %recipient, "CloudApiProvider: WhatsApp message delivered");
-            Ok(())
-        } else {
-            let status = resp.status();
-            let text = resp.text().await.unwrap_or_default();
-            warn!(recipient = %recipient, status = %status, body = %text, "CloudApiProvider: delivery failed");
-            Err(format!("WhatsApp Cloud API {status}: {text}"))
-        }
+        self.post_payload(client, recipient, &request_body).await
     }
 }
 
@@ -374,6 +555,75 @@ mod tests {
         );
         // Same channel name as Evolution → it is a drop-in compliant replacement.
         assert_eq!(p.name(), "whatsapp");
+    }
+
+    // --- CO-496: Cloud API at scale ---
+
+    #[test]
+    fn within_service_window_boundary() {
+        // Just received → open. 23h59m → open. Exactly 24h / beyond → closed.
+        assert!(within_service_window(1000, 1000));
+        assert!(within_service_window(1000, 1000 + SERVICE_WINDOW_SECS - 1));
+        assert!(!within_service_window(1000, 1000 + SERVICE_WINDOW_SECS));
+        assert!(!within_service_window(1000, 1000 + SERVICE_WINDOW_SECS + 100));
+        // Clock skew (now < last) is treated as open (saturating).
+        assert!(within_service_window(2000, 1000));
+    }
+
+    #[test]
+    fn parse_retry_after_handles_seconds_and_garbage() {
+        assert_eq!(parse_retry_after(Some("5")), Some(Duration::from_secs(5)));
+        assert_eq!(parse_retry_after(Some("  12 ")), Some(Duration::from_secs(12)));
+        assert_eq!(parse_retry_after(None), None);
+        assert_eq!(parse_retry_after(Some("")), None);
+        assert_eq!(parse_retry_after(Some("soon")), None); // HTTP-date form unsupported → None
+    }
+
+    #[test]
+    fn backoff_delay_honors_retry_after_then_exponential_capped() {
+        // Retry-After wins, capped at MAX_BACKOFF_SECS.
+        assert_eq!(
+            backoff_delay(Some(Duration::from_secs(7)), 0),
+            Duration::from_secs(7)
+        );
+        assert_eq!(
+            backoff_delay(Some(Duration::from_secs(900)), 0),
+            Duration::from_secs(MAX_BACKOFF_SECS)
+        );
+        // No header → exponential 1,2,4… capped.
+        assert_eq!(backoff_delay(None, 0), Duration::from_secs(1));
+        assert_eq!(backoff_delay(None, 2), Duration::from_secs(4));
+        assert_eq!(backoff_delay(None, 20), Duration::from_secs(MAX_BACKOFF_SECS));
+    }
+
+    #[test]
+    fn build_template_payload_with_and_without_params() {
+        let p = build_template_payload("5541999999999", "lembrete", "pt_BR", &["Festa".into()]);
+        assert_eq!(p["type"], "template");
+        assert_eq!(p["to"], "5541999999999");
+        assert_eq!(p["template"]["name"], "lembrete");
+        assert_eq!(p["template"]["language"]["code"], "pt_BR");
+        assert_eq!(p["template"]["components"][0]["type"], "body");
+        assert_eq!(
+            p["template"]["components"][0]["parameters"][0]["text"],
+            "Festa"
+        );
+
+        // No params → empty components array (a template with no variables).
+        let p0 = build_template_payload("55", "ola", "pt_BR", &[]);
+        assert_eq!(p0["template"]["components"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn window_tracker_opens_and_expires() {
+        let r = "co496-test-recipient-unique";
+        // No record yet → closed (prefer template).
+        assert!(!is_window_open_at(r, 100_000));
+        // Inbound opens it.
+        note_inbound_at(r, 100_000);
+        assert!(is_window_open_at(r, 100_000 + 10));
+        // Past 24h → closed again.
+        assert!(!is_window_open_at(r, 100_000 + SERVICE_WINDOW_SECS + 1));
     }
 
     // --- template rendering ---

@@ -150,6 +150,7 @@ pub use platform::embedding_worker;
 pub use platform::error;
 pub use platform::events;
 pub use platform::experiment;
+pub use platform::fd_limit;
 pub use platform::geo;
 pub use platform::index_manager;
 pub use platform::job_queue;
