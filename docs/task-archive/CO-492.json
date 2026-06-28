@@ -1,0 +1,28 @@
+{
+  "task_id": "CO-492",
+  "title": "LGPD retention & export of LLM-curated content (it's the user's data)",
+  "type": "user-story",
+  "status": "todo",
+  "semver_bump": null,
+  "spec_path": "work/co/CO-492.md",
+  "branch": "feat/CO-492-lgpd",
+  "merge_sha": "5052779c4daf94cb3d27d6f7f5cb3e93baf5bc9d",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/318",
+    "number": 318
+  },
+  "started_at": "2026-06-27T00:00:00Z",
+  "merged_at": "2026-06-28T10:58:39Z",
+  "files_changed": 6,
+  "lines_added": 641,
+  "lines_removed": 0,
+  "labels": [
+    "feat",
+    "whatsapp",
+    "lgpd",
+    "data-autonomy"
+  ],
+  "changelog_entry": "## CO-492 — LGPD data-rights endpoints (WhatsApp companion)\n\nAdd three caller-scoped LGPD (Art. 18) data-rights endpoints for the WhatsApp\ncompanion, all bound to the authenticated caller (`Scoped<EntriesRead>` /\n`Scoped<EntriesWrite>`, mirroring the CO-499 lead-digest fix) so a user can only\never touch their own data:\n\n- `GET  /api/v1/whatsapp/me/export` — Art. 18 V (portabilidade): the caller's\n  curated content (entries in the universes they own, where the bot writes on\n  their behalf) plus their consent record and profile, as a portable JSON bundle\n  that also carries a markdown rendering.\n- `POST /api/v1/whatsapp/me/erase`  — Art. 18 VI (eliminação): erase the caller's\n  curated content. Requires the explicit confirmation phrase `\"apagar tudo\"` in\n  the body (mirrors `commands.erase_confirm` in the consent YAML) — there is no\n  single-call destructive erase.\n- `POST /api/v1/whatsapp/me/forget` — Art. 18 + revogação do consentimento: erase\n  curated content, clear the WhatsApp link (`users.whatsapp*`) and the consent\n  record, and return `clear_local_identity: true` so the bot also wipes its local\n  identity store. Requires the confirmation phrase `\"esquece de mim\"`. Idempotent.\n\n### Why\nCloses the LGPD data-subject rights loop for the bot: portabilidade, eliminação,\nand consent revocation, with the sacred destructive-ops boundary held — erase and\nforget are never automatic and never one-step, and the bot only ever writes/erases\nthe user's own data on explicit request.\n\n### Notes\n- No new migration: \"curated content\" is defined as every entry in the universes\n  the caller owns (`Storage::list_owned_universes`), removed via\n  `SqliteEntryRepository::unindex_entry` (entries row + all projections). Forget\n  NULLs the existing `users.whatsapp*` / `whatsapp_consent_*` columns via a new\n  `Storage::clear_whatsapp_identity` helper.",
+  "summary": "GIVEN anything the assistant writes or organizes **for** a user is **that user's data** under LGPD — the model is a lens over the user's substrate, never the owner of what it produces for them, WHEN t",
+  "co_auto_version": "0.1.0"
+}
