@@ -341,11 +341,10 @@ mod tests {
     }
 
     // ── T3: retry-then-drop on persistent 5xx ─────────────────────────────────
-    #[tokio::test(start_paused = true)]
+    #[tokio::test]
     async fn test_retry_then_drop_on_persistent_5xx() {
         use axum::{Router, http::StatusCode, routing::post};
         use std::sync::atomic::Ordering;
-        use std::time::Duration;
 
         let count = Arc::new(AtomicU32::new(0));
         let c = count.clone();
@@ -367,26 +366,26 @@ mod tests {
             flush_interval_secs: 60,
             ring_buffer_cap: 1000,
         };
-        let agent = Arc::new(agent_with_url(&url, config));
+        let agent = agent_with_url(&url, config);
 
         // Add 1 event (below auto-flush threshold)
         agent.ship(&[make_event("test-universe")]).await.unwrap();
 
-        // Spawn the flush so we can advance time concurrently
-        let flush_task = {
-            let a = agent.clone();
-            tokio::spawn(async move { a.flush().await })
-        };
-
-        // Advance virtual time past all retry back-offs (max ~200ms + 100ms jitter each)
-        for _ in 0..5 {
-            tokio::time::advance(Duration::from_secs(1)).await;
-            tokio::task::yield_now().await;
-        }
-
-        let result = flush_task.await.unwrap();
+        // Drive the retry loop to completion and AWAIT it as the completion
+        // signal. `flush()` returns only after `ship_batch` has exhausted all
+        // retries (with max_retries=2: one real ~200-300ms back-off sleep, then
+        // drop), so the assertion below observes a settled state.
+        //
+        // This deliberately uses REAL time (no `start_paused`/`advance()`):
+        // virtual-time auto-advance jumps the clock straight to reqwest's request
+        // timeout, cancelling the POST before it reaches the mock server, while
+        // the old manual `advance()` + `yield_now()` loop raced the spawned flush
+        // task under parallel `--workspace` load (CO-519). Awaiting `flush()`
+        // directly makes the count fully deterministic.
+        let result = agent.flush().await;
         assert!(result.is_ok(), "flush must return Ok even after drop");
-        // max_retries=2 → 2 POST requests before giving up
+        // max_retries=2 → 2 POST requests before giving up. Read only after the
+        // worker has provably finished, so the count is fully settled.
         assert_eq!(
             count.load(Ordering::SeqCst),
             2,
