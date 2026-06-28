@@ -113,6 +113,106 @@ struct AgentSessionRecord {
     co_auto_version: Option<String>,
 }
 
+/// CO-516 — snapshot of the target repo's git state used by the preflight guard.
+///
+/// co-auto must ONLY ever start from a pristine `main` so it can never build on
+/// top of someone else's dirty tree or a concurrent feature branch (the
+/// 2026-06-28 collision: a `--headless` run checked out `feat/CO-496` in the live
+/// CWD checkout and intermingled with a concurrent Workflow). See
+/// `feedback_coauto_workflow_tree_collision`.
+#[derive(Debug, Clone)]
+pub struct RepoState {
+    /// Current branch name (`git rev-parse --abbrev-ref HEAD`).
+    pub branch: String,
+    /// True when the working tree has staged/unstaged/untracked changes.
+    pub is_dirty: bool,
+    /// Upstream of the current branch, e.g. `Some("origin/main")`, or `None`
+    /// when the branch tracks nothing.
+    pub upstream: Option<String>,
+}
+
+/// Pure decision for the preflight guard — no I/O, fully unit-testable.
+///
+/// Allows the run ONLY when the repo is on `main` with a clean working tree.
+/// If `main` has an upstream it must be `origin/main` (a missing upstream is
+/// tolerated so fresh clones / detached-remote setups aren't blocked). Returns
+/// `Err(message)` describing the first violation otherwise.
+pub fn preflight_decision(state: &RepoState) -> std::result::Result<(), String> {
+    if state.is_dirty {
+        return Err(
+            "working tree is DIRTY — commit, stash, or clean it before running co-auto \
+             (co-auto isolates each task in a git worktree and must start from a pristine base)"
+                .to_string(),
+        );
+    }
+    if state.branch != "main" {
+        return Err(format!(
+            "repo is on branch '{}', not 'main' — `git checkout main` before running co-auto \
+             (refusing to start on top of a feature branch)",
+            state.branch
+        ));
+    }
+    match state.upstream.as_deref() {
+        // On main, tracking origin/main, clean — the only fully-blessed state.
+        Some("origin/main") | None => Ok(()),
+        Some(other) => Err(format!(
+            "branch 'main' tracks '{other}', expected 'origin/main' — refusing to run co-auto"
+        )),
+    }
+}
+
+/// Gather the live git [`RepoState`] for `repo` by shelling out to git.
+fn gather_repo_state(repo: &Path) -> Result<RepoState> {
+    let git = |args: &[&str]| -> Result<std::process::Output> {
+        Command::new("git")
+            .args(args)
+            .current_dir(repo)
+            .output()
+            .with_context(|| format!("git {}", args.join(" ")))
+    };
+
+    let head = git(&["rev-parse", "--abbrev-ref", "HEAD"])?;
+    if !head.status.success() {
+        anyhow::bail!(
+            "not a git repository (or git failed) at {}: {}",
+            repo.display(),
+            String::from_utf8_lossy(&head.stderr).trim()
+        );
+    }
+    let branch = String::from_utf8_lossy(&head.stdout).trim().to_string();
+
+    let status = git(&["status", "--porcelain"])?;
+    let is_dirty = !String::from_utf8_lossy(&status.stdout).trim().is_empty();
+
+    // `@{u}` resolves the upstream; non-zero exit just means "no upstream".
+    let up = git(&["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"])?;
+    let upstream = if up.status.success() {
+        let s = String::from_utf8_lossy(&up.stdout).trim().to_string();
+        if s.is_empty() { None } else { Some(s) }
+    } else {
+        None
+    };
+
+    Ok(RepoState {
+        branch,
+        is_dirty,
+        upstream,
+    })
+}
+
+/// CO-516 preflight guard: refuse (non-zero exit) to start co-auto unless the
+/// target repo is on a clean `main`. Runs before any branch/worktree is created.
+fn preflight_guard(repo: &Path) -> Result<()> {
+    let state = gather_repo_state(repo)?;
+    preflight_decision(&state).map_err(|msg| {
+        anyhow::anyhow!(
+            "co-auto preflight failed (CO-516) for {}: {}",
+            repo.display(),
+            msg
+        )
+    })
+}
+
 pub fn run(mut config: AutoConfig) -> Result<()> {
     let mut data_dir = if let Some(ref dir) = config.data_dir {
         PathBuf::from(dir)
@@ -165,6 +265,21 @@ pub fn run(mut config: AutoConfig) -> Result<()> {
         "co auto".bold(),
         config.space.cyan()
     );
+
+    // CO-516 PREFLIGHT GUARD — refuse to start unless the target repo is on a
+    // clean `main`. co-auto isolates every task in a git worktree (below), but
+    // the guard is the belt-and-braces that prevents starting on top of a dirty
+    // tree or a feature branch in the first place. Skipped for --dry-run (which
+    // never mutates the tree). See feedback_coauto_workflow_tree_collision.
+    if !config.dry_run {
+        let repo = resolve_workdir(config.workdir.as_deref())?;
+        preflight_guard(&repo)?;
+        println!(
+            "  {} Preflight: clean main @ {}",
+            "✓".green(),
+            repo.display()
+        );
+    }
 
     if config.teams {
         ensure_teams_enabled()?;
@@ -284,7 +399,14 @@ pub fn run(mut config: AutoConfig) -> Result<()> {
 
         // 3. Create branch (with worktree if parallel) and mark as in_progress
         let base_workdir = resolve_workdir(config.workdir.as_deref())?;
-        let use_worktree = config.cycle || config.teams; // worktree when parallel execution likely
+        // CO-516: co-auto ALWAYS operates in an isolated per-task git worktree —
+        // even for a single task and even in --headless mode. The previous
+        // `config.cycle || config.teams` gate let single/headless runs check out
+        // the task branch IN-PLACE on the CWD checkout, which collided with a
+        // concurrent Workflow on 2026-06-28 (both writing one live tree). There
+        // is no longer an in-place execution path; isolation is unconditional.
+        // See feedback_coauto_workflow_tree_collision.
+        let use_worktree = true;
 
         // For worktree mode: do NOT neutralize base repo — we need the real
         // smudge filter so worktree checkout decrypts files properly.
@@ -2484,6 +2606,55 @@ mod tests {
                 details: "always fails".into(),
             })
         }
+    }
+
+    // ---- CO-516 preflight guard (pure decision) ----
+
+    fn state(branch: &str, dirty: bool, upstream: Option<&str>) -> RepoState {
+        RepoState {
+            branch: branch.into(),
+            is_dirty: dirty,
+            upstream: upstream.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn preflight_allows_clean_main_tracking_origin() {
+        assert!(preflight_decision(&state("main", false, Some("origin/main"))).is_ok());
+    }
+
+    #[test]
+    fn preflight_allows_clean_main_without_upstream() {
+        // Fresh clone / detached-remote setups must not be blocked.
+        assert!(preflight_decision(&state("main", false, None)).is_ok());
+    }
+
+    #[test]
+    fn preflight_blocks_dirty_tree_even_on_main() {
+        let err = preflight_decision(&state("main", true, Some("origin/main"))).unwrap_err();
+        assert!(err.contains("DIRTY"), "got: {err}");
+    }
+
+    #[test]
+    fn preflight_blocks_feature_branch() {
+        let err =
+            preflight_decision(&state("feat/CO-496-foo", false, Some("origin/main"))).unwrap_err();
+        assert!(err.contains("not 'main'"), "got: {err}");
+        assert!(err.contains("feat/CO-496-foo"), "got: {err}");
+    }
+
+    #[test]
+    fn preflight_blocks_dirty_feature_branch_reports_dirty_first() {
+        // Dirty is the most urgent violation and is reported before branch.
+        let err = preflight_decision(&state("feat/x", true, None)).unwrap_err();
+        assert!(err.contains("DIRTY"), "got: {err}");
+    }
+
+    #[test]
+    fn preflight_blocks_main_tracking_wrong_remote() {
+        let err = preflight_decision(&state("main", false, Some("fork/main"))).unwrap_err();
+        assert!(err.contains("fork/main"), "got: {err}");
+        assert!(err.contains("origin/main"), "got: {err}");
     }
 
     #[test]
