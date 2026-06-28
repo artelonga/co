@@ -5785,6 +5785,36 @@ paths:
       responses:
         "200":
           description: OK
+  /api/v1/whatsapp/me/erase:
+    post:
+      tags: ["integrations"]
+      summary: "CO-492 — erase caller's curated content (confirmation token required) (whatsapp_me.rs)"
+      security:
+        - sessionCookie: []
+        - bearerJWT: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/whatsapp/me/export:
+    get:
+      tags: ["integrations"]
+      summary: "CO-492 — portable bundle of the caller's curated content + consent (whatsapp_me.rs)"
+      security:
+        - sessionCookie: []
+        - bearerJWT: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/whatsapp/me/forget:
+    post:
+      tags: ["integrations"]
+      summary: "CO-492 — full forget: content + link + consent (whatsapp_me.rs)"
+      security:
+        - sessionCookie: []
+        - bearerJWT: []
+      responses:
+        "200":
+          description: OK
   /api/v1/whatsapp/telemetry/digest:
     get:
       tags: ["integrations"]
