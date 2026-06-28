@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-511",
+  "title": "CO self-host kit — scripts/selfhost/ + docs/SELF-HOST.md + docs/LOCAL-DEV.md + CO_WEB_HOST bind flag",
+  "type": "user-story",
+  "status": "in-progress",
+  "semver_bump": null,
+  "spec_path": "work/co/CO-511.md",
+  "branch": "feat/CO-511-co-self-host-kit",
+  "merge_sha": "07187212cdb71c5abc38e94c873b0646668645ea",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/321",
+    "number": 321
+  },
+  "started_at": "2026-06-28T00:00:00Z",
+  "merged_at": "2026-06-28T13:07:33Z",
+  "files_changed": 17,
+  "lines_added": 1236,
+  "lines_removed": 3,
+  "labels": [
+    "feat",
+    "self-host",
+    "dx"
+  ],
+  "changelog_entry": "## CO-511 — CO self-host kit (local-network deployment)\n\nCO is now self-hostable on a LAN/M4 with the same operational pattern proven on\nquilomboaraucaria — no Fly required (CO-497 invariant: identical code).\n\n- `scripts/selfhost/run.sh` — build + boot co-web for network self-host (binds\n  `0.0.0.0` via `CO_WEB_HOST`; `--localhost` for loopback-only). Fails closed if\n  `JWT_SECRET` is unset or the insecure dev fallback.\n- `scripts/selfhost/com.artelonga.co.plist` — launchd autostart + keepalive.\n- `scripts/selfhost/cloudflared-config.example.yml` — CGNAT-proof public reach (+ a\n  Caddy reverse-proxy alternative for operators with a public IP).\n- `scripts/selfhost/litestream.yml` + `verify-restore.sh` — off-box backup of\n  `meta.db` (+ documented companion snapshot for the dynamic per-universe `data.db`).\n- `docs/SELF-HOST.md` — full runbook; `docs/LOCAL-DEV.md` — local testing quick start.\n\n### Why\nSelf-host must be a first-class path, not a Fly afterthought. This is the operational\nwrapper around the already-self-host-ready engine (SQLite, CO-446, CO-439 allowlist,\nCO-497 cascade). Thin-binary distribution (CO-484/485/486) is the remaining gap so a\nnode needs no Rust toolchain — tracked in CO-513.",
+  "summary": "GIVEN a person should be able to run the whole of CO on their own box with no guesswork — clone, build, bind, autostart, back up — and a self-hostable platform needs a single runnable kit rather than ",
+  "co_auto_version": "0.1.0"
+}
