@@ -303,6 +303,22 @@ impl Storage {
             .and_then(|(v, a, s)| Some((v?, a?, s?)))
     }
 
+    /// CO-492 (LGPD Art. 18 + revogação do consentimento): full "forget" — clear
+    /// the caller's WhatsApp link (`users.whatsapp`) AND the consent record
+    /// (`whatsapp_consent_version/_at/_sha`) in one update. Always scoped to a
+    /// single `user_id` (the caller's own). Idempotent: NULL-ing already-NULL
+    /// columns is a no-op, so a repeat forget still returns cleanly. Returns the
+    /// number of rows updated (`1` when the user exists, `0` otherwise — note a
+    /// matched row counts as updated even if every column was already NULL).
+    pub fn clear_whatsapp_identity(&self, user_id: &str) -> anyhow::Result<usize> {
+        let updated = self.conn.execute(
+            "UPDATE users SET whatsapp = NULL, whatsapp_consent_version = NULL, \
+             whatsapp_consent_at = NULL, whatsapp_consent_sha = NULL WHERE id = ?1",
+            params![user_id],
+        )?;
+        Ok(updated)
+    }
+
     /// CO-490 (#3a uniqueness): find the user id that currently owns a given
     /// WhatsApp number, or `None`. The number is compared trimmed against the
     /// stored value (callers pass the digit-normalized form so the compare is

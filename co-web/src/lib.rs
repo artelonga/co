@@ -131,6 +131,7 @@ pub use integrations::webhook_routes;
 pub use integrations::webhook_worker;
 pub use integrations::whatsapp_cloud_routes;
 pub use integrations::whatsapp_consent;
+pub use integrations::whatsapp_me;
 
 // platform context
 pub use platform::ab;
