@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-516",
+  "title": "co-auto worktree isolation — always isolate (even headless), converge on the Workflow substrate",
+  "type": "user-story",
+  "status": "todo",
+  "semver_bump": null,
+  "spec_path": "work/co/CO-516.md",
+  "branch": "chore/CO-516-agentization-batch",
+  "merge_sha": "5f96c0a79811aa497d65fb99019d46cb2f8d5f0a",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/323",
+    "number": 323
+  },
+  "started_at": "2026-06-28T00:00:00Z",
+  "merged_at": "2026-06-28T14:04:24Z",
+  "files_changed": 8,
+  "lines_added": 271,
+  "lines_removed": 0,
+  "labels": [
+    "feat",
+    "co-auto",
+    "infra"
+  ],
+  "changelog_entry": null,
+  "summary": "GIVEN `co-auto --headless` ran **in-place in the main repo checkout** (the CWD, via `dev/co-auto/src/auto.rs`) and intermingled with a concurrently running Workflow — the 2026-06-28 CO-496/CO-492 coll",
+  "co_auto_version": "0.1.0"
+}
