@@ -698,6 +698,14 @@ async fn start_server_inner(config: WebConfig, bind_host: &str) {
 
     let addr = format!("{}:{}", bind_host, config.port);
     let display_url = format!("http://127.0.0.1:{}", config.port);
+    // CO-512: surface the resolved bind host so an operator can see whether the
+    // server is LAN-exposed ("0.0.0.0") or locked to loopback ("127.0.0.1").
+    tracing::info!(
+        bind_host = %bind_host,
+        port = config.port,
+        co_env = %config.co_env,
+        "binding HTTP server to {addr}"
+    );
     tracing::info!("\n  Project Board\n  {}\n", display_url);
 
     // CO-164: spawn embedding OS thread + load model after server binds.

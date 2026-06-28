@@ -1,0 +1,98 @@
+# Litestream config — continuous off-box backup of co-web's SQLite databases.
+#
+# WHY THIS MATTERS: on a home Mac the machine is a SINGLE POINT OF FAILURE — disk
+# death, theft, fire, a bad `rm`, or a corrupting power loss all destroy the only
+# copy. co-web's SQLite databases are the OPERATIONAL SOURCE OF TRUTH, so a live
+# off-box replica is the disaster-recovery backbone, not a nice-to-have. Litestream
+# streams the WAL to an object-store bucket continuously (seconds of data loss at
+# worst) and restores the whole DB to a fresh machine.
+#
+# ── CO-77 DATA LAYOUT NUANCE (read this) ─────────────────────────────────────
+# co-web does NOT use a single DB. The layout is:
+#     $CO_WEB_DATA/meta.db                      ← GLOBAL: universes, users,
+#                                                 schema_version, telemetry, …
+#     $CO_WEB_DATA/universes/<key>/data.db      ← PER-UNIVERSE content (one per
+#                                                 universe, WAL mode)
+#
+# Litestream needs an EXPLICIT path per database — it cannot wildcard a directory
+# of databases, and per-universe DBs appear/disappear DYNAMICALLY as universes are
+# created. So the strategy is TWO-PRONGED:
+#   1. Litestream covers meta.db here (the global DB — always exactly one path).
+#   2. The per-universe universes/<key>/data.db files are covered by a
+#      COMPLEMENTARY periodic snapshot (tar/rsync) — see the block at the bottom.
+# If you have a small, KNOWN set of universes you may instead add one `dbs:` entry
+# per universe below (copy the meta.db block, change the path/replica path). For an
+# open-ended set, use the tar/rsync companion so new universes are covered without
+# editing this file.
+#
+# The meta.db path MUST match run.sh: $CO_WEB_DATA/meta.db
+# (default ~/.co/data/meta.db). Litestream relies on WAL mode, which co-web enables.
+#
+# INSTALL
+# -------
+#   brew install benbjohnson/litestream/litestream   # or: brew install litestream
+#
+# CREDENTIALS (do NOT hardcode keys in this file if it might be shared):
+#   export LITESTREAM_ACCESS_KEY_ID=...
+#   export LITESTREAM_SECRET_ACCESS_KEY=...
+#   (Litestream reads these env vars automatically; the keys below can be left out.)
+#
+# RUN AS A SERVICE (background, starts at boot):
+#   sudo cp scripts/selfhost/litestream.yml /etc/litestream.yml
+#   sudo brew services start litestream        # uses /etc/litestream.yml
+#   # (or wrap `litestream replicate -config ...` in a launchd plist of your own)
+#
+# RUN CONTINUOUSLY (foreground test):
+#   litestream replicate -config scripts/selfhost/litestream.yml
+#
+# RESTORE (disaster recovery — run BEFORE starting the app on a new machine):
+#   litestream restore -config scripts/selfhost/litestream.yml \
+#     ~/.co/data/meta.db
+#   # then restore the per-universe DBs from your tar/rsync snapshot (bottom block),
+#   # then start run.sh. Verify the meta.db replica anytime with verify-restore.sh.
+#
+# Replace placeholders: <USER>, <BUCKET>, region/endpoint for your provider.
+
+dbs:
+  - path: /Users/<USER>/.co/data/meta.db
+    replicas:
+      # ── Option A: Backblaze B2 (S3-compatible) — cheap, recommended ──────────
+      - type: s3
+        bucket: <BUCKET>                       # e.g. co-backups
+        path: meta.db                          # key prefix within the bucket
+        endpoint: s3.us-west-004.backblazeb2.com   # your B2 region endpoint
+        region: us-west-004                    # match the endpoint region
+        # access-key-id / secret-access-key: prefer the LITESTREAM_* env vars above.
+        # access-key-id: <KEY_ID>
+        # secret-access-key: <APP_KEY>
+        retention: 720h                        # keep 30 days of snapshots
+        snapshot-interval: 24h
+
+      # ── Option B: AWS S3 (uncomment instead of A) ───────────────────────────
+      # - type: s3
+      #   bucket: <BUCKET>
+      #   path: meta.db
+      #   region: sa-east-1                     # São Paulo
+      #   retention: 720h
+      #   snapshot-interval: 24h
+
+# ─────────────────────────────────────────────────────────────────────────────
+# COMPANION: per-universe data.db snapshot (NOT handled by Litestream above).
+#
+# Litestream cannot wildcard the dynamic universes/<key>/data.db set, so cover
+# them with a periodic archive of the whole universes/ tree. Add a cron entry
+# (or a launchd timer) like this (B2/S3 via rclone, or AWS CLI):
+#
+#   # nightly tar + upload (example; adjust bucket/paths):
+#   0 3 * * *  tar -C "$HOME/.co/data" -czf "/tmp/co-universes-$(date +\%F).tar.gz" universes \
+#                && rclone copy "/tmp/co-universes-$(date +\%F).tar.gz" b2:co-backups/universes/ \
+#                && rm -f "/tmp/co-universes-$(date +\%F).tar.gz"
+#
+#   # OR continuous-ish rsync to another disk / NAS:
+#   */15 * * * *  rsync -a --delete "$HOME/.co/data/universes/" /Volumes/backup/co-universes/
+#
+# NOTE: for a crash-consistent per-universe snapshot, prefer copying the .db plus
+# its -wal/-shm sidecars together (tar of the dir does this), or run
+# `sqlite3 <db> ".backup '<out>'"` per universe before upload. For a small, stable
+# set of universes, promoting each to its own `dbs:` entry above gives you the same
+# point-in-time/WAL guarantees as meta.db.
