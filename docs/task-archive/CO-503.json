@@ -1,0 +1,28 @@
+{
+  "task_id": "CO-503",
+  "title": "Canonical tool contract — one LLM-shaped tool interface for CO's Rust tools and the agent's CoTools",
+  "type": "user-story",
+  "status": "in-progress",
+  "semver_bump": null,
+  "spec_path": "work/co/CO-503.md",
+  "branch": "feat/CO-503-canonical-tool-contract",
+  "merge_sha": "b9391eb063e021752d445bfafdcab20e1cbb29d9",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/324",
+    "number": 324
+  },
+  "started_at": "2026-06-28T00:00:00Z",
+  "merged_at": "2026-06-28T15:37:28Z",
+  "files_changed": 14,
+  "lines_added": 1440,
+  "lines_removed": 1,
+  "labels": [
+    "feat",
+    "agents",
+    "tools",
+    "architecture"
+  ],
+  "changelog_entry": "## CO-503 — Canonical tool contract + external-tool adapter (the composability spine)\n\nTools are now composable: any open-source software — a CLI/script or an HTTP\nservice — becomes a tool via a manifest entry, with **zero binary recompile**.\nThis is the foundation the agent runtime (CO-504) and every tool extraction\n(CO-521/522) plug into. NOT MCP — CO's own adapter.\n\n- **`CanonicalTool`** (additive — the legacy `Tool` trait is untouched):\n  `name · description · input_schema(JSON) · tool_type(deterministic|predictive) ·\n  run(args: Json) -> Json` — the LLM-callable shape, matching the bot's CoTools and\n  `tools/schema.yaml`. Plus a `CanonicalToolRegistry` (register/get/list).\n- **External-tool adapter** behind an injectable `ExternalInvoker`:\n  `SubprocessInvoker` (core, std-only — `env_clear()` + per-manifest secrets\n  allowlist, JSON over stdio, non-zero exit → error) and an `HttpInvoker` (reqwest,\n  wired in co-web). An `ExternalTool` validates `input_schema` then delegates — so a\n  new OSS tool is a manifest YAML, not a code change.\n- **Manifest discovery** from a **trusted location only** (`CO_TOOLS_DIR`, default\n  `tools.d/`) — never from universe/observed content — and **opt-in, default OFF**\n  (`CO_ENABLE_EXTERNAL_TOOLS`); a default deploy executes nothing external.\n  `tools.d/` ships `echo.example.yaml` + `yt-summarizer.example.yaml` + a README.\n- **Legacy bridge** (`LegacyToolAdapter`): wraps a legacy `dyn Tool` as a\n  `CanonicalTool` so the existing tools are callable through the canonical registry.\n\n### Why\nComposability without a binary rewrite is the whole point: add the RAG framework,\nan R kernel, or any OSS as an optional add-on by dropping a manifest. Security is\ndesigned in (trusted-manifest-only, opt-in, no ambient secrets, validated args,\ntimed HTTP) — verified by the CO-503 trust-boundary review.\n\n### Remaining (follow-ups)\n- Wire the 3 concrete legacy tools into a canonical registry in production (the\n  bridge mechanism is built + tested; the production wiring is pending).\n- Build the registry into a runtime path — done when CO-504 (agent runtime) consumes it.\n- Stateful session/kernel tool kind (R/REPL) → CO-524.",
+  "summary": "GIVEN CO has two incompatible tool systems — Rust trait-based tools (`co/src/tool.rs`, 3 tools) and the agent's Python `CoTools` (Anthropic JSON-schema shape, in `tools/whatsapp-bot/bridge/capabilitie",
+  "co_auto_version": "0.1.0"
+}
