@@ -1,0 +1,20 @@
+# Example predictive HTTP service tool (CO-503) — the reference adapter shape.
+# An out-of-process OSS summarizer reachable over HTTP becomes a CO tool with no
+# recompile. Disabled by default (status: inactive) so it is documentation, not a
+# live dependency; flip to `active` once the service is running.
+name: yt-summarizer
+description: Summarize a YouTube video given its URL (out-of-process HTTP service).
+tool_type: predictive
+url: http://localhost:9000/summarize
+category: media
+status: inactive
+dependencies:
+  - yt-dlp
+input_schema:
+  type: object
+  properties:
+    url:
+      type: string
+      description: The YouTube video URL to summarize.
+  required:
+    - url

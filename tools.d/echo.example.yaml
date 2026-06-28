@@ -1,0 +1,15 @@
+# Example deterministic subprocess tool (CO-503).
+# `cat` reads the JSON we write to stdin and echoes it back on stdout — a
+# zero-dependency, offline-safe reference for the subprocess contract.
+name: echo
+description: Echoes the JSON arguments back unchanged (subprocess reference tool).
+tool_type: deterministic
+command: cat
+category: example
+status: active
+input_schema:
+  type: object
+  properties:
+    message:
+      type: string
+      description: Anything; it is returned verbatim.
