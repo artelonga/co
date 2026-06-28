@@ -18,7 +18,7 @@ use serde::Deserialize;
 use serde_json::json;
 
 use crate::auth::UserId;
-use crate::notification_providers::{ChannelProvider, CloudApiProvider, EvolutionApiProvider};
+use crate::notification_providers::ChannelProvider;
 use crate::server::AppState;
 
 // ---------------------------------------------------------------------------
@@ -127,12 +127,8 @@ pub async fn run_birthday_job(state: &AppState) -> usize {
     if targets.is_empty() {
         return 0;
     }
-    let provider: Option<Box<dyn ChannelProvider>> = CloudApiProvider::from_env()
-        .map(|p| Box::new(p) as Box<dyn ChannelProvider>)
-        .or_else(|| {
-            EvolutionApiProvider::from_env().map(|p| Box::new(p) as Box<dyn ChannelProvider>)
-        });
-    let Some(provider) = provider else {
+    // CO-497: shared Cloud → Evolution cascade (managed → self-host).
+    let Some(provider) = crate::notification_providers::whatsapp_provider_cascade() else {
         for (_, name, number) in &targets {
             tracing::info!(
                 "[birthday dev-fallback] no WhatsApp provider configured — would greet {}: {}",
@@ -182,10 +178,29 @@ async fn consent_handler(
         )
             .into_response();
     }
+    // CO-490 R2: normalize the WhatsApp number to digits-only before storing, using
+    // the SAME helper the link flow uses (`whatsapp_cloud_routes::validate_whatsapp`).
+    // Otherwise an un-normalized number stored here would never match
+    // `Storage::get_user_id_by_whatsapp` (exact match on the digit form), silently
+    // bypassing the one-number-per-account uniqueness check. A provided-but-digitless
+    // number is rejected with 400.
+    let whatsapp = match req.whatsapp.as_deref() {
+        Some(raw) => match crate::whatsapp_cloud_routes::validate_whatsapp(raw) {
+            Ok(digits) => Some(digits),
+            Err(_) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "whatsapp must contain digits"})),
+                )
+                    .into_response();
+            }
+        },
+        None => None,
+    };
     let storage = state.core.storage.lock();
     let res = storage.conn().execute(
         "UPDATE users SET birthday = ?1, birthday_consent = ?2, whatsapp = COALESCE(?3, whatsapp) WHERE id = ?4",
-        params![req.birthday, req.consent as i64, req.whatsapp, uid],
+        params![req.birthday, req.consent as i64, whatsapp, uid],
     );
     match res {
         Ok(_) => (
@@ -267,6 +282,43 @@ mod tests {
                 .push((recipient.to_string(), payload.to_string()));
             Ok(())
         }
+    }
+
+    /// CO-490 R2: the consent handler must store the WhatsApp number in the SAME
+    /// digit-normalized form the link flow uses, so a number captured here is found
+    /// by `Storage::get_user_id_by_whatsapp` (exact match on the digit form) and the
+    /// one-number-per-account uniqueness check cannot be bypassed.
+    #[test]
+    fn consent_stores_normalized_whatsapp_matching_link_uniqueness() {
+        use crate::storage::Storage;
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut storage = Storage::new(dir.path());
+        let user = storage
+            .create_user("yuri@artelonga.com.br", "Yuri")
+            .expect("create user");
+
+        // The user types a "pretty" number into the birthday-consent form.
+        let raw = "+55 (41) 99999-9999";
+        // The handler normalizes via the SAME helper the link flow uses.
+        let normalized = crate::whatsapp_cloud_routes::validate_whatsapp(raw).unwrap();
+        assert_eq!(normalized, "5541999999999"); // digits-only canonical form
+        storage
+            .conn()
+            .execute(
+                "UPDATE users SET whatsapp = COALESCE(?1, whatsapp) WHERE id = ?2",
+                params![Some(&normalized), user.id],
+            )
+            .unwrap();
+
+        // The link-flow uniqueness lookup (digit-normalized input) now finds it —
+        // proving the two code paths agree on the stored form.
+        let link_form = crate::whatsapp_cloud_routes::validate_whatsapp("5541999999999").unwrap();
+        assert_eq!(
+            storage.get_user_id_by_whatsapp(&link_form).as_deref(),
+            Some(user.id.as_str()),
+            "birthday-stored number must match the CO-490 normalized form"
+        );
     }
 
     /// E2E of the logic: a consented user with today's birthday is selected and

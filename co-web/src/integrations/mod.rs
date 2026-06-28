@@ -12,3 +12,4 @@ pub mod webhook;
 pub mod webhook_routes;
 pub mod webhook_worker;
 pub mod whatsapp_cloud_routes;
+pub mod whatsapp_consent;

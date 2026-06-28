@@ -25,6 +25,11 @@ use crate::server::AppState;
 #[derive(Deserialize)]
 struct ChatReq {
     text: String,
+    /// CO-489: optional tenant universe, forwarded to the brain so the companion
+    /// app routes to the same multi-tenant brain as WhatsApp. Backward-compatible
+    /// — omitting it falls back to the brain's default universe.
+    #[serde(default)]
+    universe: Option<String>,
 }
 
 pub fn router(state: AppState) -> Router<AppState> {
@@ -37,7 +42,17 @@ fn brain_url() -> String {
     crate::infra::secrets::global().get_or("CO_BOT_BRAIN_URL", "http://127.0.0.1:8765/api/chat")
 }
 
-async fn chat_handler(Json(req): Json<ChatReq>) -> Response {
+/// CO-490 (#5): the loopback authentication header the bot brain checks. Built
+/// purely from the `CO_BOT_SHARED_SECRET` value so it is unit-testable without a
+/// live socket: `Some(("X-Bot-Secret", secret))` when the secret is set and
+/// non-empty, `None` otherwise (header omitted → brain treats it as unset).
+pub fn brain_auth_header(secret: Option<String>) -> Option<(&'static str, String)> {
+    secret
+        .filter(|s| !s.is_empty())
+        .map(|s| ("X-Bot-Secret", s))
+}
+
+async fn chat_handler(user_id: crate::auth::UserId, Json(req): Json<ChatReq>) -> Response {
     let text = req.text.trim();
     if text.is_empty() {
         return (
@@ -46,12 +61,24 @@ async fn chat_handler(Json(req): Json<ChatReq>) -> Response {
         )
             .into_response();
     }
-    let client = reqwest::Client::new();
-    let resp = client
-        .post(brain_url())
-        .json(&json!({ "text": text, "sender": "app" }))
-        .send()
-        .await;
+    // CO-490 (#1): forward the authenticated user so the bot acts AS that user
+    // (its BrainRouter keys per-user permissions off `user_id`). `sender` stays
+    // "app" so the brain still knows the surface this came from.
+    let mut payload = json!({ "text": text, "sender": "app", "user_id": user_id.0 });
+    if let Some(u) = req.universe.as_deref().filter(|u| !u.is_empty()) {
+        payload["universe"] = json!(u);
+    }
+    // CO-489: reuse the ONE shared, timed client (no per-request `Client::new()`
+    // — that had no timeout, so a stuck brain hop leaked the task forever).
+    let client = crate::whatsapp_cloud_routes::shared_client();
+    let mut builder = client.post(brain_url()).json(&payload);
+    // CO-490 (#5): authenticate co-web → bot over loopback when configured.
+    if let Some((name, value)) =
+        brain_auth_header(crate::infra::secrets::global().get("CO_BOT_SHARED_SECRET"))
+    {
+        builder = builder.header(name, value);
+    }
+    let resp = builder.send().await;
     match resp {
         Ok(r) if r.status().is_success() => {
             let body = r.bytes().await.unwrap_or_default();
@@ -114,5 +141,18 @@ mod tests {
         assert!(parse_reply(br#"{"reply":""}"#).is_none());
         assert!(parse_reply(br#"{"intent":"chat"}"#).is_none());
         assert!(parse_reply(b"not json").is_none());
+    }
+
+    // CO-490 (#5): the loopback secret header is present iff the secret is set.
+    #[test]
+    fn brain_auth_header_present_only_when_secret_set() {
+        assert_eq!(
+            brain_auth_header(Some("shh".to_string())),
+            Some(("X-Bot-Secret", "shh".to_string()))
+        );
+        // Unset → no header.
+        assert_eq!(brain_auth_header(None), None);
+        // Empty → treated as unset.
+        assert_eq!(brain_auth_header(Some(String::new())), None);
     }
 }

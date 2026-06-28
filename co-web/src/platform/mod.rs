@@ -19,6 +19,7 @@ pub mod geo;
 pub mod index_manager;
 pub mod job_queue;
 pub mod kb_routes;
+pub mod lead_digest;
 pub mod live_routes;
 pub mod observability;
 pub mod pipeline;

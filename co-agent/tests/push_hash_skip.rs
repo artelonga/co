@@ -183,11 +183,11 @@ fn walkdir_files(dir: &PathBuf) -> Vec<(PathBuf, String)> {
             let path = entry.path();
             if path.is_dir() {
                 recurse(root, &path, out);
-            } else if path.is_file() {
-                if let Ok(rel) = path.strip_prefix(root) {
-                    let rel_str = rel.to_string_lossy().replace('\\', "/");
-                    out.push((path, rel_str));
-                }
+            } else if path.is_file()
+                && let Ok(rel) = path.strip_prefix(root)
+            {
+                let rel_str = rel.to_string_lossy().replace('\\', "/");
+                out.push((path, rel_str));
             }
         }
     }

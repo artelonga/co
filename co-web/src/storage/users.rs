@@ -230,6 +230,98 @@ impl Storage {
         Ok(true)
     }
 
+    /// CO-490: set the caller's WhatsApp number (`users.whatsapp`, added in
+    /// migration v093) so the WhatsApp bot can resolve an inbound sender number
+    /// back to this account. Always scoped to a single `user_id` — the caller's
+    /// own id — never another user's. The value is stored trimmed; an
+    /// already-trimmed-empty value is rejected by the route layer before this is
+    /// called. Returns the number of rows updated (`1` on success, `0` if the
+    /// user id does not exist).
+    pub fn set_user_whatsapp(&self, user_id: &str, whatsapp: &str) -> anyhow::Result<usize> {
+        let normalized = whatsapp.trim();
+        if normalized.is_empty() {
+            return Err(anyhow::anyhow!("whatsapp cannot be empty"));
+        }
+        let updated = self.conn.execute(
+            "UPDATE users SET whatsapp = ?1 WHERE id = ?2",
+            params![normalized, user_id],
+        )?;
+        Ok(updated)
+    }
+
+    /// CO-490: read the stored WhatsApp number for a user (`None` when unset).
+    pub fn get_user_whatsapp(&self, user_id: &str) -> Option<String> {
+        self.conn
+            .query_row(
+                "SELECT whatsapp FROM users WHERE id = ?1",
+                params![user_id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .ok()
+            .flatten()
+    }
+
+    /// CO-491: durably record the versioned consent a user agreed to at link
+    /// time (`users.whatsapp_consent_version/_at/_sha`, added in migration v094) —
+    /// the LGPD demonstrabilidade record (Art. 8º §2º). Always scoped to a single
+    /// `user_id` (the caller's own). `version` is the document version string,
+    /// `at` an RFC 3339 timestamp, `sha` the sha256 (hex) of the rendered
+    /// agreement text. Returns the number of rows updated (`1` on success, `0` if
+    /// the user id does not exist).
+    pub fn set_whatsapp_consent(
+        &self,
+        user_id: &str,
+        version: &str,
+        at: &str,
+        sha: &str,
+    ) -> anyhow::Result<usize> {
+        let updated = self.conn.execute(
+            "UPDATE users SET whatsapp_consent_version = ?1, whatsapp_consent_at = ?2, \
+             whatsapp_consent_sha = ?3 WHERE id = ?4",
+            params![version, at, sha, user_id],
+        )?;
+        Ok(updated)
+    }
+
+    /// CO-491: read the recorded consent `(version, at, sha)` for a user, or
+    /// `None` when no consent has been recorded (any column NULL ⇒ never linked).
+    pub fn get_whatsapp_consent(&self, user_id: &str) -> Option<(String, String, String)> {
+        self.conn
+            .query_row(
+                "SELECT whatsapp_consent_version, whatsapp_consent_at, whatsapp_consent_sha \
+                 FROM users WHERE id = ?1",
+                params![user_id],
+                |row| {
+                    Ok((
+                        row.get::<_, Option<String>>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                    ))
+                },
+            )
+            .ok()
+            .and_then(|(v, a, s)| Some((v?, a?, s?)))
+    }
+
+    /// CO-490 (#3a uniqueness): find the user id that currently owns a given
+    /// WhatsApp number, or `None`. The number is compared trimmed against the
+    /// stored value (callers pass the digit-normalized form so the compare is
+    /// apples-to-apples). Used to enforce one-number-per-account at link/verify:
+    /// if the match is a *different* user the link is rejected with `409`.
+    pub fn get_user_id_by_whatsapp(&self, whatsapp: &str) -> Option<String> {
+        let normalized = whatsapp.trim();
+        if normalized.is_empty() {
+            return None;
+        }
+        self.conn
+            .query_row(
+                "SELECT id FROM users WHERE whatsapp = ?1",
+                params![normalized],
+                |row| row.get::<_, String>(0),
+            )
+            .ok()
+    }
+
     // --- UAT-specific methods (CO-44) ---
 
     /// Get user by email along with their stored Argon2 password hash.

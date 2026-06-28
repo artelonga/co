@@ -475,6 +475,15 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             // CO-479: WhatsApp Cloud API inbound webhook (Meta HMAC-verified
             // in-handler, no auth gate — same posture as the billing webhook).
             .nest("/api/v1", crate::whatsapp_cloud_routes::router())
+            // CO-490: companion-app account link — AUTHENTICATED. Mounted with
+            // the `require_auth` gate so the handler only ever links the caller's
+            // own account (the webhook above stays ungated).
+            .nest(
+                "/api/v1",
+                crate::whatsapp_cloud_routes::link_router().layer(
+                    axum::middleware::from_fn_with_state(state.clone(), crate::auth::require_auth),
+                ),
+            )
             // CO-388: Security findings API (admin-gated).
             .nest("/api/v1/gestao/security", security_admin)
             // CO-142 Phase A: dev board moved to /api/v1/admin to un-shadow universe_api.
@@ -643,6 +652,12 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             // each handler self-gates via `Scoped<TelemetryRead>` (CO-448
             // `telemetry:read`), so no auth middleware layer is needed here.
             .nest("/api/v1/telemetry", crate::telemetry_api::router())
+            // CO-499: read-only lead-temperature digest (output B). Self-gates
+            // via `Scoped<TelemetryRead>` (telemetry:read), so no auth layer here.
+            .nest("/api/v1", crate::lead_digest::router())
+            // CO-491: deterministic, versioned WhatsApp consent text. Public
+            // (it *is* the consent copy); the bot displays it verbatim.
+            .nest("/api/v1", crate::whatsapp_consent::router())
             .nest("/api/v1", crate::search_routes::router())
             .nest(
                 "/api/v1/auth/recovery",

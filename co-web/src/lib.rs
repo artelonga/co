@@ -130,6 +130,7 @@ pub use integrations::webhook;
 pub use integrations::webhook_routes;
 pub use integrations::webhook_worker;
 pub use integrations::whatsapp_cloud_routes;
+pub use integrations::whatsapp_consent;
 
 // platform context
 pub use platform::ab;
@@ -152,6 +153,7 @@ pub use platform::geo;
 pub use platform::index_manager;
 pub use platform::job_queue;
 pub use platform::kb_routes;
+pub use platform::lead_digest;
 pub use platform::live_routes;
 pub use platform::observability;
 pub use platform::pipeline;

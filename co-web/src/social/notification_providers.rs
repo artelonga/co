@@ -178,7 +178,11 @@ impl EvolutionApiProvider {
     pub fn from_env() -> Option<Self> {
         let secrets = crate::infra::secrets::global();
         let api_key = secrets.get("EVOLUTION_API_KEY")?;
-        let api_url = secrets.get_or("EVOLUTION_API_URL", "https://api.evolution-api.com");
+        // CO-497: default to a LOCAL Evolution (self-host) — never the public SaaS.
+        // A self-hoster who sets only EVOLUTION_API_KEY must not have their WhatsApp
+        // silently routed through a third party; set EVOLUTION_API_URL explicitly
+        // to target a remote instance.
+        let api_url = secrets.get_or("EVOLUTION_API_URL", "http://localhost:8080");
         let instance = secrets.get_or("EVOLUTION_INSTANCE", "default");
         Some(Self {
             api_url,
@@ -329,6 +333,21 @@ impl ChannelProvider for CloudApiProvider {
 /// Encode an email notification payload as `subject\n---\nbody`.
 pub fn encode_email_payload(subject: &str, body: &str) -> String {
     format!("{subject}\n---\n{body}")
+}
+
+/// CO-497: the WhatsApp send cascade — **the self-host/managed invariant in one
+/// place**. Prefer the official Cloud API (managed/public deploys with a Meta app
+/// and token), else fall back to Evolution (self-host: QR-links your own WhatsApp,
+/// outbound-only, no Meta app and no public webhook — survives residential CGNAT).
+/// `None` ⇒ no channel configured (callers log/no-op). Every WhatsApp send (OTP,
+/// reply, greeting) goes through this so a self-hosted deploy with only Evolution
+/// works identically to a managed Cloud deploy.
+pub fn whatsapp_provider_cascade() -> Option<Box<dyn ChannelProvider>> {
+    CloudApiProvider::from_env()
+        .map(|p| Box::new(p) as Box<dyn ChannelProvider>)
+        .or_else(|| {
+            EvolutionApiProvider::from_env().map(|p| Box::new(p) as Box<dyn ChannelProvider>)
+        })
 }
 
 // ---------------------------------------------------------------------------
