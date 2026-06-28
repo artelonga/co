@@ -21,7 +21,7 @@ info:
     `Accept: application/vnd.co.v1+json`) para receber o corpo embrulhado no
     schema `Envelope` (`{ data, meta, errors }`). Sem o marcador o corpo é
     idêntico ao formato legado; respostas não-JSON nunca são embrulhadas.
-  version: "3.20.0"
+  version: "3.22.0"
   contact:
     name: Arte Longa
     email: yuri@artelonga.com.br
@@ -93,6 +93,8 @@ tags:
     description: "telemetry endpoints"
   - name: "ai"
     description: "ai endpoints"
+  - name: "integrations"
+    description: "integrations endpoints"
   - name: "chat-llm"
     description: "chat-llm endpoints"
   - name: "changelog"
@@ -530,6 +532,16 @@ paths:
       responses:
         "200":
           description: OK
+  /api/v1/admin/birthday/run:
+    post:
+      tags: ["admin"]
+      summary: "CO-487 — trigger the birthday-greeting job (seed-admin only, enforced in-handler) (birthday.rs)"
+      security:
+        - sessionCookie: []
+        - bearerJWT: []
+      responses:
+        "200":
+          description: OK
   /api/v1/admin/changelog/reindex:
     post:
       tags: ["admin"]
@@ -813,6 +825,16 @@ paths:
     get:
       tags: ["analytics + telemetry"]
       summary: "CO-179 public summary"
+      responses:
+        "200":
+          description: OK
+  /api/v1/auth/birthday-consent:
+    post:
+      tags: ["auth"]
+      summary: "CO-487 — birthday-greeting opt-in consent (birthday.rs)"
+      security:
+        - sessionCookie: []
+        - bearerJWT: []
       responses:
         "200":
           description: OK
@@ -1176,6 +1198,16 @@ paths:
           required: true
           schema:
             type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/bot/chat:
+    post:
+      tags: ["integrations"]
+      summary: "CO-483 — authenticated chat proxy to the loopback bot bridge (bot_proxy_routes.rs)"
+      security:
+        - sessionCookie: []
+        - bearerJWT: []
       responses:
         "200":
           description: OK
@@ -5723,6 +5755,56 @@ paths:
       security:
         - sessionCookie: []
         - bearerJWT: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/whatsapp/consent:
+    get:
+      tags: ["integrations"]
+      summary: "CO-491 — deterministic versioned consent text (`{operator}` substitution) (whatsapp_consent.rs)"
+      responses:
+        "200":
+          description: OK
+  /api/v1/whatsapp/link/start:
+    post:
+      tags: ["integrations"]
+      summary: "CO-490 — send a per-user OTP to a WhatsApp number (whatsapp_cloud_routes.rs)"
+      security:
+        - sessionCookie: []
+        - bearerJWT: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/whatsapp/link/verify:
+    post:
+      tags: ["integrations"]
+      summary: "CO-490 — verify OTP, link number + mint scoped token (whatsapp_cloud_routes.rs)"
+      security:
+        - sessionCookie: []
+        - bearerJWT: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/whatsapp/telemetry/digest:
+    get:
+      tags: ["integrations"]
+      summary: "CO-499 — lead-temperature digest, named-vs-aggregate (lead_digest.rs)"
+      security:
+        - bearerJWT: []
+        - apiToken: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/whatsapp/webhook:
+    get:
+      tags: ["integrations"]
+      summary: "CO-479 — Meta HMAC verification handshake (whatsapp_cloud_routes.rs)"
+      responses:
+        "200":
+          description: OK
+    post:
+      tags: ["integrations"]
+      summary: "CO-479/480 — Meta HMAC-signed message events → bot brain (whatsapp_cloud_routes.rs)"
       responses:
         "200":
           description: OK
