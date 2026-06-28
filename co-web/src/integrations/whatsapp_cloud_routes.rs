@@ -883,8 +883,14 @@ mod tests {
         assert_eq!(parse_ingress_queue(Some("512".into())), 512);
         assert_eq!(parse_ingress_queue(Some("  64 ".into())), 64);
         // Invalid / empty / zero → default (never a 0-capacity queue).
-        assert_eq!(parse_ingress_queue(Some(String::new())), DEFAULT_INGRESS_QUEUE);
-        assert_eq!(parse_ingress_queue(Some("abc".into())), DEFAULT_INGRESS_QUEUE);
+        assert_eq!(
+            parse_ingress_queue(Some(String::new())),
+            DEFAULT_INGRESS_QUEUE
+        );
+        assert_eq!(
+            parse_ingress_queue(Some("abc".into())),
+            DEFAULT_INGRESS_QUEUE
+        );
         assert_eq!(parse_ingress_queue(Some("0".into())), DEFAULT_INGRESS_QUEUE);
     }
 

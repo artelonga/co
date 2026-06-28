@@ -333,7 +333,9 @@ fn recipient_windows() -> &'static Mutex<HashMap<String, u64>> {
 /// their 24h window). Prunes entries older than the window so the map stays bounded
 /// by the count of *recently-active* recipients.
 pub fn note_inbound_at(recipient: &str, now_unix: u64) {
-    let mut map = recipient_windows().lock().unwrap_or_else(|e| e.into_inner());
+    let mut map = recipient_windows()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     map.retain(|_, &mut t| within_service_window(t, now_unix));
     map.insert(recipient.to_string(), now_unix);
 }
@@ -341,7 +343,9 @@ pub fn note_inbound_at(recipient: &str, now_unix: u64) {
 /// Is `recipient`'s 24h free-form window currently open? `false` when we have no
 /// record of a recent inbound (→ caller should fall back to an approved template).
 pub fn is_window_open_at(recipient: &str, now_unix: u64) -> bool {
-    let map = recipient_windows().lock().unwrap_or_else(|e| e.into_inner());
+    let map = recipient_windows()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     map.get(recipient)
         .map(|&t| within_service_window(t, now_unix))
         .unwrap_or(false)
@@ -565,7 +569,10 @@ mod tests {
         assert!(within_service_window(1000, 1000));
         assert!(within_service_window(1000, 1000 + SERVICE_WINDOW_SECS - 1));
         assert!(!within_service_window(1000, 1000 + SERVICE_WINDOW_SECS));
-        assert!(!within_service_window(1000, 1000 + SERVICE_WINDOW_SECS + 100));
+        assert!(!within_service_window(
+            1000,
+            1000 + SERVICE_WINDOW_SECS + 100
+        ));
         // Clock skew (now < last) is treated as open (saturating).
         assert!(within_service_window(2000, 1000));
     }
@@ -573,7 +580,10 @@ mod tests {
     #[test]
     fn parse_retry_after_handles_seconds_and_garbage() {
         assert_eq!(parse_retry_after(Some("5")), Some(Duration::from_secs(5)));
-        assert_eq!(parse_retry_after(Some("  12 ")), Some(Duration::from_secs(12)));
+        assert_eq!(
+            parse_retry_after(Some("  12 ")),
+            Some(Duration::from_secs(12))
+        );
         assert_eq!(parse_retry_after(None), None);
         assert_eq!(parse_retry_after(Some("")), None);
         assert_eq!(parse_retry_after(Some("soon")), None); // HTTP-date form unsupported → None
@@ -593,7 +603,10 @@ mod tests {
         // No header → exponential 1,2,4… capped.
         assert_eq!(backoff_delay(None, 0), Duration::from_secs(1));
         assert_eq!(backoff_delay(None, 2), Duration::from_secs(4));
-        assert_eq!(backoff_delay(None, 20), Duration::from_secs(MAX_BACKOFF_SECS));
+        assert_eq!(
+            backoff_delay(None, 20),
+            Duration::from_secs(MAX_BACKOFF_SECS)
+        );
     }
 
     #[test]

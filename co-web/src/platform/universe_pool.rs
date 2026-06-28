@@ -1132,11 +1132,16 @@ mod time_migration_tests {
         // backfill SELECT never runs and body_chars stays 0.
         run_universe_migrations(&conn, "uni").unwrap();
         let chars: i64 = conn
-            .query_row("SELECT body_chars FROM entries WHERE path='n.md'", [], |r| {
-                r.get(0)
-            })
+            .query_row(
+                "SELECT body_chars FROM entries WHERE path='n.md'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
-        assert_eq!(chars, 0, "fast path must skip the body-metrics backfill scan");
+        assert_eq!(
+            chars, 0,
+            "fast path must skip the body-metrics backfill scan"
+        );
     }
 
     /// Fresh databases get the ms columns from the base schema and the
