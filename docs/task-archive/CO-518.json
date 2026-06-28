@@ -1,0 +1,28 @@
+{
+  "task_id": "CO-518",
+  "title": "Wave-review fixes — Cloud-API window fallback, erase/forget contract, wamid retry, digest param (+ cross-process contract tests)",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": null,
+  "spec_path": "work/co/CO-518.md",
+  "branch": "fix/CO-518-wave-review-fixes",
+  "merge_sha": "1e8e9029e3e21fb3673cfa4f21ac12c92357e010",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/322",
+    "number": 322
+  },
+  "started_at": "2026-06-28T00:00:00Z",
+  "merged_at": "2026-06-28T13:42:50Z",
+  "files_changed": 6,
+  "lines_added": 579,
+  "lines_removed": 52,
+  "labels": [
+    "fix",
+    "whatsapp",
+    "lgpd",
+    "tests"
+  ],
+  "changelog_entry": "## CO-518 — wave-review fixes: WhatsApp window/template fallback, retry-safe dedup, digest window param\n\nFixes from the wave review of the WhatsApp Cloud API + lead-digest work, each with a\ncontract/integration test on the ACTUAL request/response shape (closing the\nlib-vs-integration gap where both sides of a cross-process contract were unit-tested\nwith fakes that re-encoded the bug).\n\n### HIGH — CO-496 24h-window / template fallback was dead code\n`is_window_open` / `send_template` / `build_template_payload` had no production\ncaller. Both business-initiated send paths now use it:\n- OTP (`link_start_handler`) and birthday greetings (`birthday::send_greetings`) call\n  the new `ChannelProvider::send_business_initiated`, which on the Cloud API falls\n  back to a pre-approved **template** when the recipient is outside the 24h\n  customer-service window (free-form text Meta would reject).\n- Template name/lang are configurable via env (`CO_WHATSAPP_OTP_TEMPLATE` /\n  `CO_WHATSAPP_BIRTHDAY_TEMPLATE`, `*_LANG`, default `pt_BR`). When the window is\n  closed and no template is configured, the send is refused with an actionable\n  error instead of silently sending text Meta rejects.\n- Tests: pure `build_business_payload` shape assertions + a real local-server\n  integration test asserting the bytes on the wire are a `template` outside the\n  window and `text` inside it (`WHATSAPP_GRAPH_BASE` makes the send path\n  redirectable for the capture server).\n\n### MED — wamid dedup no longer poisons Meta retries\n`event_handler` recorded the wamid as seen BEFORE `enqueue_inbound`, so a SHED\n(queue-full) message stayed \"seen\" and Meta's retry of that dropped message was\ndeduped away and lost. The dedup is now split into a PEEK (`wamid_is_duplicate`)\nand a RECORD (`record_wamid_seen`); the record happens only after a successful\nenqueue. Test models the shed→retry sequence (retry is processed, not dropped).\n\n### LOW — birthday job reuses the shared timed client\n`run_birthday_job` built an untimed `reqwest::Client::new()` (a stuck send could\nhang a worker forever); it now reuses `whatsapp_cloud_routes::shared_client()` (the\nprocess-wide 30s-timed client).\n\n### LOW — lead-digest accepts the bot's `window` param\n`DigestQuery` only read `days`, but the bot (`co_tools.telemetry_digest`) sends\n`window=7d`/`30d`, so the window was silently ignored. It now accepts `window`\n(`\"<n>d\"` or a bare integer; `days` still works and wins when both are present).\nContract test deserializes the actual `universe=acme&window=30d` query string and\nasserts a 30-day window.",
+  "summary": "GIVEN the wave code-review found 11 verified defects in shipped work — most critically that the LGPD erase/forget right and the Cloud-API link flow were **non-functional** because both sides of each c",
+  "co_auto_version": "0.1.0"
+}
