@@ -4,7 +4,10 @@
 > full refactor / reorganization plan that turns CO from a monolith-with-embedded-
 > tenants into a **generalist, composable, self-hostable agent platform**.
 >
-> Status: proposal for owner review. Backlog already cut as **CO-503 … CO-527**.
+> Status: proposal for owner review. Backlog already cut as **CO-503 … CO-530**;
+> new adopt-now add-on tasks proposed as **CO-531 … CO-534** (§4 + owner decision #7).
+> The full estate-level tool registry (every candidate, mode + ponytail verdict) lives in
+> [`ArteLonga/docs/TOOL-REVIEW.md`](../../../ArteLonga/docs/TOOL-REVIEW.md).
 > Baseline version at time of writing: `3.22.0`.
 
 ---
@@ -118,7 +121,8 @@ Everything in the platform is expressed as a composition of three model-agnostic
                    └──────────────────┘
 
    CONTRACT-TEST TIER (CO-520) ── verifies every ║ boundary above (lib↔integration gap)
-   EXTERNAL ADD-ONS via manifest (NOT MCP): LlamaIndex(rag) · DSPy(prompt-compile) · RAGAS(eval) · vLLM(serving swap)
+   EXTERNAL ADD-ONS via manifest (NOT MCP): LlamaIndex(rag) · DSPy(prompt-compile) · RAGAS(eval) · voicebox(voice) · last30days(research) · R(stats) · vLLM(serving swap)
+   ABSORBED TECHNIQUES (no dep): headroom(context-compression) · FTS5/BM25 · PPMI/SVD · deer-flow/LangGraph(checkpoint/HITL ideas)   |   full registry → ArteLonga/docs/TOOL-REVIEW.md
 ```
 
 ---
@@ -184,9 +188,37 @@ For each subsystem: the AS IS, the **recommended pick**, and the **one advantage
   - **Promotion:** `comunicacao` → a **subscribable co universe** (not yggdrasil-internal only); content stays canonical markdown in its own repo, the write-back contribution flow is preserved (CO-529).
   - **Sovereignty gate (non-negotiable):** for sacred corpora (Ayvu Rapytã / Ifá Odù) the artifact is **custodian-gated, never auto-shipped** — CARE principles govern access, not a build script.
 
+### 3.8 External tool add-ons & techniques — the composed estate
+
+> **Governing lens — "ponytail" (`DietrichGebert/ponytail`): the most efficient code is the
+> one you didn't write.** A "full refactor using all of these tools" is **not** cramming
+> them into the binary — it is making them all **composable** and wiring only the high-value
+> few. The full estate-level registry (every candidate, its mode + verdict) lives in
+> [`ArteLonga/docs/TOOL-REVIEW.md`](../../../ArteLonga/docs/TOOL-REVIEW.md); this subsection
+> is the CO-side incorporation.
+
+Every external tool enters by one of six **integration modes**, ordered by code cost —
+**almost none add binary code:**
+
+| Mode | How it enters | Tools (examples) |
+|---|---|---|
+| **`co503-addon`** | one manifest row (`tools.d/*.yaml`), local service/CLI, **NOT MCP** | LlamaIndex, RAGAS, voicebox, last30days, daily_stock_analysis (freeze), R/RStudio, OpenMontage |
+| **`technique`** | absorb the *method*, no new dep | headroom (context-compression), FTS5/BM25, PPMI+SVD, DSPy (also addon), deer-flow/LangGraph *ideas*, vLLM (config swap) |
+| **`skill`** | `.claude/skills` layer (dev agent, not product) | last30days, mattpocock/skills |
+| **`frontend-dep`** | co-web / yggdrasil front only, never the core | Web Awesome (Shoelace v3), PixiJS v8, Three.js |
+| **`ours-not-import`** | build our own; the external is a concept | codebase-memory-mcp → universe-atlas + CO-74 (**no MCP**) |
+| **`freeze` / `reference`** | catalogued, not wired | daily_stock_analysis (trading dormant), odysseus, CrewAI/LangGraph/AutoGen, full game engines |
+
+The discipline: **manifest > new dep > new binary code**; **absorb a technique > import a
+framework**; **reuse a primitive (agent/tool/vectorizer/workflow) > add a fourth**. The
+five runnable adapters in [`examples/integrations/`](../../examples/integrations/) are the
+reference proof that any OSS becomes a CO tool by manifest with **zero recompile**. "Using
+all of these" means **all are available as add-ons** — only the high-value few are wired
+(see §4 phase notes and the TOOL-REVIEW shortlist).
+
 ---
 
-## 4. Refactor plan — sequenced phases mapping CO-503 … CO-527
+## 4. Refactor plan — sequenced phases mapping CO-503 … CO-534
 
 Discipline applied throughout:
 - **Additive vs invasive** is called per item.
@@ -219,27 +251,30 @@ Discipline applied throughout:
 ### Phase 3 — Agent runtime promoted into co
 | Item | Nature | Note |
 |------|--------|------|
-| **CO-504** agent runtime (`Backend` trait) | **invasive** | the loop moves into `co`; Ollama default, Claude/OpenAI-compatible. |
+| **CO-504** agent runtime (`Backend` trait) | **invasive** | the loop moves into `co`; Ollama default, Claude/OpenAI-compatible; vLLM is a config swap behind the trait. |
 | **CO-505** capability packs | additive | personas/`agents/*.md` become packs. |
 | **CO-507** WhatsApp as thin client | invasive (external) | bot calls the in-co runtime. |
 | **CO-508** bot → "agente" rename | additive | terminology + client framing. |
+| **CO-532** context-compression in runtime | **technique (absorbed)** | absorb the **headroom** method into the agent's context window — fewer tokens, same task; no new dep. |
 
 *Depends on Phase 2 (tools) — the runtime calls tools.*
 
 ### Phase 4 — Vectorizers & retrieval
 | Item | Nature | Note |
 |------|--------|------|
-| **CO-517** Vectorizer trait + sqlite-vec + FTS5/BM25 + nomic/BGE-M3 + PPMI | **invasive (new subsystem)** | the representation layer; in-store, sovereign. |
+| **CO-517** Vectorizer trait + sqlite-vec + FTS5/BM25 + nomic/BGE-M3 + PPMI | **invasive (new subsystem)** | the representation layer; in-store, sovereign. FTS5/PPMI are absorbed techniques (no dep). |
 | **CO-525** production-agentic-RAG add-on | **manifest add-on** | LlamaIndex(rag) + DSPy(prompt-compile) + RAGAS(eval), local services. |
+| **CO-534** wire LlamaIndex/DSPy/RAGAS | **manifest add-on** | land CO-525's three add-ons in order (ingest → prompt-compile → eval-gate) via `tools.d/`. |
+| **CO-533** last30days research add-on | **manifest add-on + skill** | research/digest as a CO-503 tool *and* a `.claude` skill; feeds leads/digests, no product code. |
 
 *Depends on Phase 3 (agents use vectorizers) and Phase 2 (RAG tools register via manifest).*
 
 ### Phase 5 — Composition
 | Item | Nature | Note |
 |------|--------|------|
-| **CO-506** workflows compose agents/tools/vectorizers | **invasive** | on the Phase 0 one-runner substrate; mine LangGraph checkpoint/HITL *ideas*. |
-| **CO-522** voice tool | manifest add-on | predictive tool. |
-| **CO-524** R/RStudio-web REPL (session/kernel tool) | manifest add-on | session/kernel tool via CO-503. |
+| **CO-506** workflows compose agents/tools/vectorizers | **invasive** | on the Phase 0 one-runner substrate; mine LangGraph **and deer-flow** checkpoint/HITL *ideas* (reference, not a second engine). |
+| **CO-522 / CO-531** voice tool (voicebox) | manifest add-on | predictive tool — **voicebox** STT/TTS as a thin client of the runtime; OpenMontage (video) catalogued for later. |
+| **CO-524** R/RStudio-web REPL (session/kernel tool) | manifest add-on | session/kernel tool via CO-503 (sample `r-stats/`). |
 
 ### Phase 6 — Surfaces (parallelizable once core is stable)
 | Item | Nature | Note |
@@ -248,7 +283,18 @@ Discipline applied throughout:
 | **CO-527** web game engine (PixiJS v8 → Three.js) | stack change (frontend), additive | render-only client; game-core unchanged. |
 
 ### Dependency order (one line)
-`0 (safety+isolation) → 1 (de-tenant) → 2 (tool contract) → 3 (agent runtime) → 4 (vectors/RAG) → 5 (workflows) → 6 (UI/game, parallel)`.
+`0 (safety+isolation) → 1 (de-tenant) → 2 (tool contract) → 3 (agent runtime + headroom compression) → 4 (vectors/RAG + LlamaIndex/DSPy/RAGAS + last30days) → 5 (workflows + voicebox/R) → 6 (UI/game, parallel)`.
+
+> **Where the rest of the estate's tools land** (full registry + verdicts in
+> [`ArteLonga/docs/TOOL-REVIEW.md`](../../../ArteLonga/docs/TOOL-REVIEW.md)): **voicebox**→P5
+> (CO-531), **headroom** context-compression→P3 (CO-532), **last30days**→P4 (CO-533),
+> **LlamaIndex/DSPy/RAGAS**→P4 (CO-534, lands CO-525). Catalogued / not wired now:
+> daily_stock_analysis (`freeze` — trading dormant), OpenMontage (`co503-addon`, later),
+> codebase-memory-mcp (`ours-not-import` — it's MCP; the concept is universe-atlas + CO-74),
+> odysseus + mattpocock/skills (`reference`/`skill`), CrewAI/LangGraph/AutoGen and full game
+> engines (`reference` — one-runner / render-only discipline). Net: ~5 wired (all
+> manifest/front-dep), ~6 absorbed as techniques, the rest catalogued — **composition, not
+> binary growth.**
 
 ---
 
