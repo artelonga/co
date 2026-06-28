@@ -33,6 +33,7 @@ and these out-of-process tools are invoked **identically**.
 |---|---|---|---|---|
 | [`r-stats/`](r-stats/) | CO-503 tool | `deterministic` | `command` (Rscript) | R / RStudio vision — any R script as a tool (stateful REPL = CO-524). |
 | [`rag-service/`](rag-service/) | CO-503 tool | `predictive` | `url` (HTTP) | LlamaIndex / production-agentic-rag behind the manifest (CO-525). |
+| [`voicebox/`](voicebox/) | CO-503 tool | `predictive` | `url` (HTTP) | Self-hosted STT/TTS (jamiepine/voicebox) behind the manifest; local-first, no API bill (CO-522 / CO-531). |
 | [`embed/`](embed/) | CO-503 tool | `deterministic` | `command` (python3) | Embeddings as a tool; output feeds the CO-517 Vectorizer + sqlite-vec. |
 | [`topology/`](topology/) | CO-503 tool | `deterministic` | `command` (python3) | comunicacao meaning-topology as a tool any surface calls; PPMI offline / neural overlay = CO-517 Vectorizer (CO-528). |
 | [`ui-web-awesome/`](ui-web-awesome/) | **frontend (NOT a tool)** | — | — | Web Awesome (Shoelace v3) components, no-rewrite UI path; CSS-var theming. |
@@ -45,6 +46,9 @@ echo '{"values":[10,12,23,23,16,23,21,16]}' | Rscript examples/integrations/r-st
 
 # rag-service (stdlib Python; start it, then curl)
 python3 examples/integrations/rag-service/service.py   # then: curl -s -X POST localhost:9100/query -d '{"query":"tool contract"}'
+
+# voicebox (stdlib Python; start it, then curl)
+python3 examples/integrations/voicebox/service.py   # then: curl -s -X POST localhost:9200/voice -d '{"action":"transcribe","audio_b64":"ZGVtbw=="}'
 
 # embed (offline deterministic fallback; drop CO_EMBED_BACKEND to try Ollama)
 echo '{"texts":["hello","world"]}' | CO_EMBED_BACKEND=fallback python3 examples/integrations/embed/embed.py

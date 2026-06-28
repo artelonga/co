@@ -18,23 +18,30 @@ ran=0; skip=0
 hr(){ printf '\n\033[1m===== %s =====\033[0m\n' "$1"; }
 note(){ printf '  \033[2m%s\033[0m\n' "$1"; }
 
-hr "1/5  topology — comunicacao meaning-topology as a tool (deterministic, offline PPMI)"
+hr "1/6  topology — comunicacao meaning-topology as a tool (deterministic, offline PPMI)"
 note "manifest: examples/integrations/topology/topology.yaml  | input: {word, lang?, k?}"
 if echo '{"word":"ñe'\''ẽ","lang":"gn","k":5}' | python3 "$EX/topology/topology.py"; then ran=$((ran+1)); fi
 
-hr "2/5  embed — embeddings tool feeding the CO-517 Vectorizer (offline hashed fallback)"
+hr "2/6  embed — embeddings tool feeding the CO-517 Vectorizer (offline hashed fallback)"
 note "manifest: examples/integrations/embed/embed.yaml  | input: {texts[]}  (neural via Ollama if up)"
 if echo '{"texts":["palavra","word","alma"]}' | CO_EMBED_BACKEND=fallback python3 "$EX/embed/embed.py" \
    | python3 -c 'import json,sys; d=json.load(sys.stdin); print(json.dumps({"model":d["model"],"dim":d["dim"],"n_vectors":len(d["vectors"]),"vec0_first6":[round(x,3) for x in d["vectors"][0][:6]]}))'; then ran=$((ran+1)); fi
 
-hr "3/5  rag-service — external HTTP RAG add-on (LlamaIndex / production-agentic-rag, CO-525)"
+hr "3/6  rag-service — external HTTP RAG add-on (LlamaIndex / production-agentic-rag, CO-525)"
 note "manifest: examples/integrations/rag-service/rag-service.yaml  | url: POST /query {query}"
 python3 "$EX/rag-service/service.py" >/dev/null 2>&1 & SVC=$!
 sleep 1
 if curl -s --max-time 3 -X POST localhost:9100/query -H 'content-type: application/json' -d '{"query":"canonical tool contract"}'; then echo; ran=$((ran+1)); else echo "  (service did not respond)"; fi
 kill "$SVC" 2>/dev/null
 
-hr "4/5  r-stats — an R script as a deterministic tool (R / RStudio path; stateful REPL = CO-524)"
+hr "4/6  voicebox — local-first STT/TTS add-on (jamiepine/voicebox, no API bill; CO-522/CO-531)"
+note "manifest: examples/integrations/voicebox/voicebox.yaml  | url: POST /voice {action,audio_b64|text}"
+python3 "$EX/voicebox/service.py" >/dev/null 2>&1 & VSVC=$!
+sleep 1
+if curl -s --max-time 3 -X POST localhost:9200/voice -H 'content-type: application/json' -d '{"action":"transcribe","audio_b64":"ZGVtbw=="}'; then echo; ran=$((ran+1)); else echo "  (service did not respond)"; fi
+kill "$VSVC" 2>/dev/null
+
+hr "5/6  r-stats — an R script as a deterministic tool (R / RStudio path; stateful REPL = CO-524)"
 note "manifest: examples/integrations/r-stats/r-stats.yaml  | input: {values[] | csv_path}"
 if command -v Rscript >/dev/null 2>&1; then
   echo '{"values":[10,12,23,16,21,23]}' | Rscript "$EX/r-stats/summary.R" && ran=$((ran+1))
@@ -42,7 +49,7 @@ else
   echo "  SKIP — Rscript not installed (it is a declared 'dependencies' entry; the stdin->stdout JSON contract is reviewable in summary.R)"; skip=$((skip+1))
 fi
 
-hr "5/5  ui-web-awesome — framework-agnostic web components (frontend path, NOT a CO-503 tool)"
+hr "6/6  ui-web-awesome — framework-agnostic web components (frontend path, NOT a CO-503 tool)"
 note "Open in a browser to review:"
 echo "    python3 -m http.server -d $EX/ui-web-awesome 8080   # then http://localhost:8080"
 skip=$((skip+1))
