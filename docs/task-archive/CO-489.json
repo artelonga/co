@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-489",
+  "title": "WhatsApp tenant routing — forward phone_number_id to the bot brain",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": null,
+  "spec_path": "work/co/CO-489.md",
+  "branch": "chore/CO-489-catalog-and-ledger",
+  "merge_sha": "67d773ce2dc6f79db9c42295c7a238bdf5de3319",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/317",
+    "number": 317
+  },
+  "started_at": "2026-06-26T00:00:00Z",
+  "merged_at": "2026-06-28T01:30:01Z",
+  "files_changed": 8,
+  "lines_added": 141,
+  "lines_removed": 37,
+  "labels": [
+    "feat",
+    "whatsapp",
+    "multi-tenant"
+  ],
+  "changelog_entry": "## CO-489 — WhatsApp tenant routing + local end-to-end verification\n\nOne bot deploy serves many customers: the inbound WhatsApp business number\n(`phone_number_id`) selects the tenant universe, so onboarding a customer is a\nconfig edit, not a code change.\n\n- The inbound `phone_number_id` is parsed from the Cloud API webhook metadata and\n  forwarded to the bot brain (`whatsapp_cloud_routes.rs` → `CO_BOT_BRAIN_URL`),\n  which maps it to a universe + that universe's `bot/profile`.\n- **`scripts/whatsapp-webhook-smoke.sh`** — a Meta→co-web→brain integration test\n  that runs locally with no Meta: posts an HMAC-signed Cloud payload and asserts\n  the fast 200, `phone_number_id` forwarding, forged-signature 401, and the GET\n  verification handshake. Sample payloads use fictional numbers only.\n- **`docs/whatsapp-launch.md`** — launch runbook: the end-to-end path, the\n  cheapest→live test ladder, the secret/env matrix, zero-code per-customer\n  onboarding, and the pre-live gaps (durable bot `CO_TOKEN` identity, cross-tenant\n  authorization, and gating the keyless-degrade reply).\n\n### Why\nA single multi-tenant deploy keeps per-customer cost at zero marginal code, and\nthe signed-webhook smoke makes the otherwise Meta-dependent inbound path provable\non every change without a live WhatsApp round-trip.",
+  "summary": "GIVEN one bot deploy should serve many customers, WHEN the inbound Cloud API webhook forwards the business `phone_number_id` (which number was messaged) to the bot brain, THEN the brain maps `phone_nu",
+  "co_auto_version": "0.1.0"
+}
