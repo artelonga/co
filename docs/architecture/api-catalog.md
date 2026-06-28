@@ -79,6 +79,7 @@ to the default is a later one-liner once consumers adopt the header.
 | GET | `/api/v1/auth/tokens` | authed | List API tokens |
 | DELETE | `/api/v1/auth/tokens/{id}` | authed | Revoke API token |
 | GET | `/api/v1/auth/login-options` | anon | CO-303 — login methods available |
+| POST | `/api/v1/auth/birthday-consent` | authed | CO-487 — birthday-greeting opt-in consent (birthday.rs) |
 
 **Recovery channels (CO-165) — all authed, mounted at /api/v1/auth/recovery/**
 
@@ -497,6 +498,7 @@ All inside `universe_content_api` gate (owner for write). `blob/*` is read-throu
 | GET | `/api/v1/admin/backup/snapshots` | admin | CO-365 — list snapshots from backup backend |
 | POST | `/api/v1/admin/backup` | admin | CO-459 — reconstructable local snapshot (VACUUM INTO + sha256 manifest); returns verified manifest |
 | POST | `/api/v1/admin/sweep` | admin | CO-459 — junk sweep; dry-run default, `?apply=true` to delete |
+| POST | `/api/v1/admin/birthday/run` | admin | CO-487 — trigger the birthday-greeting job (seed-admin only, enforced in-handler) (birthday.rs) |
 
 ---
 
@@ -662,6 +664,26 @@ CO-328 AI provider endpoints (Ollama / Claude Code hook).
 |---|---|---|---|
 | POST | `/api/v1/ai/query` | authed | AI completion query |
 | GET | `/api/v1/ai/status` | authed | AI provider status |
+
+---
+
+## integrations — `/api/v1/whatsapp/*`, `/api/v1/bot/*` (whatsapp_cloud_routes.rs + whatsapp_consent.rs + lead_digest.rs + bot_proxy_routes.rs)
+
+CO-479/480/483/490/491/499: WhatsApp Cloud API bridge + companion-app account
+link + authenticated bot proxy. The inbound webhook is Meta-HMAC-verified
+in-handler (ungated, like the billing webhook); the link + chat routes sit behind
+`require_auth`; the consent text is public; the lead digest self-gates via
+`Scoped<TelemetryRead>`.
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| POST | `/api/v1/bot/chat` | authed | CO-483 — authenticated chat proxy to the loopback bot bridge (bot_proxy_routes.rs) |
+| GET | `/api/v1/whatsapp/webhook` | anon | CO-479 — Meta HMAC verification handshake (whatsapp_cloud_routes.rs) |
+| POST | `/api/v1/whatsapp/webhook` | anon | CO-479/480 — Meta HMAC-signed message events → bot brain (whatsapp_cloud_routes.rs) |
+| POST | `/api/v1/whatsapp/link/start` | authed | CO-490 — send a per-user OTP to a WhatsApp number (whatsapp_cloud_routes.rs) |
+| POST | `/api/v1/whatsapp/link/verify` | authed | CO-490 — verify OTP, link number + mint scoped token (whatsapp_cloud_routes.rs) |
+| GET | `/api/v1/whatsapp/consent` | anon | CO-491 — deterministic versioned consent text (`{operator}` substitution) (whatsapp_consent.rs) |
+| GET | `/api/v1/whatsapp/telemetry/digest` | telemetry:read | CO-499 — lead-temperature digest, named-vs-aggregate (lead_digest.rs) |
 
 ---
 
