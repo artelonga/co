@@ -1,3 +1,4 @@
+pub mod canon_tool;
 pub mod config;
 pub mod context;
 pub mod engine;

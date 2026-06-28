@@ -25,6 +25,8 @@ rust-embed = "8"
 jsonwebtoken = "9"
 redb = "2"
 co = { path = "../core" }
+# CO-503: canonical tool contract + legacy Tool trait live in the co-engine crate.
+co-engine = { path = "../co" }
 game-core = { path = "../game-core" }
 argon2 = { workspace = true }
 blake3 = { workspace = true }

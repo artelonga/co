@@ -1,5 +1,6 @@
 pub mod ai_routes;
 pub mod bot_proxy_routes;
+pub mod canon_tools;
 pub mod chat_routes;
 pub mod email_smtp;
 pub mod feedback_routes;
