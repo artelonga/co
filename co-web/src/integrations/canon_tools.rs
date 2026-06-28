@@ -14,8 +14,8 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use co_engine::canon_tool::{
-    external_tools_enabled, register_external_tools, CanonicalToolRegistry, ExternalInvoker,
-    ExternalSpec, SubprocessInvoker, ToolManifest,
+    CanonicalToolRegistry, ExternalInvoker, ExternalSpec, SubprocessInvoker, ToolManifest,
+    external_tools_enabled, register_external_tools,
 };
 use serde_json::Value;
 

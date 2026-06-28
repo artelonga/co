@@ -40,9 +40,9 @@
 //! passed through by name only. This keeps a manifest-declared OSS tool from
 //! exfiltrating unrelated credentials.
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::Path;
@@ -267,11 +267,7 @@ impl ExternalInvoker for SubprocessInvoker {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            bail!(
-                "tool command failed ({}): {}",
-                output.status,
-                stderr.trim()
-            );
+            bail!("tool command failed ({}): {}", output.status, stderr.trim());
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -645,7 +641,10 @@ mod tests {
             assert_eq!(t, back);
             assert_eq!(ToolType::parse(t.as_str()).unwrap(), t);
         }
-        assert_eq!(serde_json::to_string(&ToolType::Predictive).unwrap(), "\"predictive\"");
+        assert_eq!(
+            serde_json::to_string(&ToolType::Predictive).unwrap(),
+            "\"predictive\""
+        );
         assert!(ToolType::parse("nonsense").is_err());
         assert_eq!(ToolType::default(), ToolType::Deterministic);
     }
@@ -760,7 +759,10 @@ mod tests {
             secrets: vec![],
         };
         let tool = ExternalTool::new(manifest, Box::new(FakeInvoker::default()));
-        assert_eq!(tool.input_schema(), json!({"type": "object", "properties": {}}));
+        assert_eq!(
+            tool.input_schema(),
+            json!({"type": "object", "properties": {}})
+        );
     }
 
     // --- legacy bridge -----------------------------------------------------
@@ -771,7 +773,10 @@ mod tests {
         assert_eq!(adapter.name(), "legacy");
         assert_eq!(adapter.description(), "A legacy tool.");
         assert_eq!(adapter.tool_type(), ToolType::Deterministic);
-        assert_eq!(adapter.input_schema().get("required").unwrap(), &json!(["action"]));
+        assert_eq!(
+            adapter.input_schema().get("required").unwrap(),
+            &json!(["action"])
+        );
 
         let out = adapter
             .run(json!({"action": "build", "params": {"a": "1", "b": "2"}}))
@@ -782,14 +787,24 @@ mod tests {
     #[test]
     fn legacy_adapter_requires_action() {
         let adapter = LegacyToolAdapter::new(Box::new(FakeLegacy));
-        assert!(adapter.run(json!({"params": {}})).unwrap_err().to_string().contains("action"));
+        assert!(
+            adapter
+                .run(json!({"params": {}}))
+                .unwrap_err()
+                .to_string()
+                .contains("action")
+        );
     }
 
     #[test]
     fn legacy_adapter_registers_in_canonical_registry() {
         let mut reg = CanonicalToolRegistry::new();
         reg.register(Box::new(LegacyToolAdapter::new(Box::new(FakeLegacy))));
-        let out = reg.get("legacy").unwrap().run(json!({"action": "x"})).unwrap();
+        let out = reg
+            .get("legacy")
+            .unwrap()
+            .run(json!({"action": "x"}))
+            .unwrap();
         assert_eq!(out, json!({"output": "ran x with 0 params"}));
     }
 
@@ -849,8 +864,10 @@ input_schema:
         std::fs::write(dir.path().join("a.yaml"), "name: dup\ncommand: 'true'\n").unwrap();
         std::fs::write(dir.path().join("b.yaml"), "name: dup\ncommand: 'true'\n").unwrap();
         let mut reg = CanonicalToolRegistry::new();
-        let err = register_external_tools(&mut reg, dir.path(), |_m| Ok(Box::new(FakeInvoker::default())))
-            .unwrap_err();
+        let err = register_external_tools(&mut reg, dir.path(), |_m| {
+            Ok(Box::new(FakeInvoker::default()))
+        })
+        .unwrap_err();
         assert!(err.to_string().contains("duplicate tool name"));
     }
 
@@ -859,8 +876,10 @@ input_schema:
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("bad.yaml"), "name: bad\nstatus: active\n").unwrap();
         let mut reg = CanonicalToolRegistry::new();
-        let err = register_external_tools(&mut reg, dir.path(), |_m| Ok(Box::new(FakeInvoker::default())))
-            .unwrap_err();
+        let err = register_external_tools(&mut reg, dir.path(), |_m| {
+            Ok(Box::new(FakeInvoker::default()))
+        })
+        .unwrap_err();
         assert!(err.to_string().contains("neither `command` nor `url`"));
     }
 
