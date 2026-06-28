@@ -658,6 +658,11 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             // CO-491: deterministic, versioned WhatsApp consent text. Public
             // (it *is* the consent copy); the bot displays it verbatim.
             .nest("/api/v1", crate::whatsapp_consent::router())
+            // CO-492: LGPD data-rights endpoints (Art. 18) for the WhatsApp
+            // companion. Each handler self-gates via `Scoped<…>` and is
+            // caller-scoped (a user can only touch their own data), so no auth
+            // middleware layer is needed here.
+            .nest("/api/v1", crate::whatsapp_me::router())
             .nest("/api/v1", crate::search_routes::router())
             .nest(
                 "/api/v1/auth/recovery",
