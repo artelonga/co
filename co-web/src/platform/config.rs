@@ -7,6 +7,12 @@ pub struct Args {
     #[arg(short, long, env = "CO_WEB_PORT", default_value_t = 8742)]
     pub port: u16,
 
+    /// Bind host. When unset, resolves from `CO_ENV`: `local` -> `127.0.0.1`
+    /// (lock down dev), everything else -> `0.0.0.0` (Fly/prod/network deploy).
+    /// Set `CO_WEB_HOST=0.0.0.0` to expose a local-env server on the LAN.
+    #[arg(long, env = "CO_WEB_HOST")]
+    pub web_host: Option<String>,
+
     /// Data directory path
     #[arg(short, long, env = "CO_WEB_DATA", default_value = "./data")]
     pub data: String,
@@ -66,6 +72,22 @@ pub struct WebConfig {
     /// middleware passes every request through unconditionally. Set via
     /// `CO_BYPASS_RATE_LIMIT=1`. Has no effect outside `CO_ENV=test`.
     pub bypass_rate_limit: bool,
+}
+
+/// CO-512: resolve the TCP bind host for the web server.
+///
+/// Rules (in order):
+/// 1. an explicit, non-empty `CO_WEB_HOST` always wins;
+/// 2. otherwise `co_env == "local"` binds `127.0.0.1` (lock down local dev so a
+///    dev server is never reachable from the LAN);
+/// 3. otherwise bind `0.0.0.0` (Fly/prod and any network deploy keep working —
+///    this preserves the previous unconditional `0.0.0.0` behaviour).
+pub fn resolve_bind_host(explicit: Option<&str>, co_env: &str) -> String {
+    match explicit {
+        Some(h) if !h.is_empty() => h.to_string(),
+        _ if co_env == "local" => "127.0.0.1".to_string(),
+        _ => "0.0.0.0".to_string(),
+    }
 }
 
 impl WebConfig {
@@ -157,6 +179,41 @@ mod tests {
             !config_with_env("").is_local_or_test(),
             "empty CO_ENV must NOT be treated as local/test (fail closed → prod-safe)"
         );
+    }
+
+    /// CO-512: an explicit `CO_WEB_HOST` always wins, regardless of `CO_ENV`.
+    #[test]
+    fn resolve_bind_host_explicit_wins() {
+        for env in &["local", "prod", "uat", "test", "dev", "", "production"] {
+            assert_eq!(
+                resolve_bind_host(Some("192.168.1.50"), env),
+                "192.168.1.50",
+                "explicit CO_WEB_HOST must win for CO_ENV={env:?}"
+            );
+        }
+        // Explicit 0.0.0.0 exposes a local-env server on the LAN (opt-in).
+        assert_eq!(resolve_bind_host(Some("0.0.0.0"), "local"), "0.0.0.0");
+    }
+
+    /// CO-512: `CO_ENV=local` with no explicit host locks down to loopback.
+    #[test]
+    fn resolve_bind_host_local_is_loopback() {
+        assert_eq!(resolve_bind_host(None, "local"), "127.0.0.1");
+        // An empty explicit host is treated as unset (falls through to env rules).
+        assert_eq!(resolve_bind_host(Some(""), "local"), "127.0.0.1");
+    }
+
+    /// CO-512: prod/unset/uat/test/etc. keep the previous `0.0.0.0` behaviour
+    /// so Fly/prod and any network deploy keep working.
+    #[test]
+    fn resolve_bind_host_non_local_is_all_interfaces() {
+        for env in &["prod", "", "uat", "test", "dev", "staging", "production"] {
+            assert_eq!(
+                resolve_bind_host(None, env),
+                "0.0.0.0",
+                "non-local CO_ENV must bind 0.0.0.0 for CO_ENV={env:?}"
+            );
+        }
     }
 
     #[test]

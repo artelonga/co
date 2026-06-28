@@ -1,0 +1,70 @@
+# Cloudflare Tunnel config for co-web self-host.
+#
+# WHY: a home Mac is behind residential CGNAT — there is no public IP and no way
+# to port-forward inbound. A Cloudflare Tunnel makes an OUTBOUND connection from
+# the Mac to Cloudflare's edge, which then proxies public HTTPS traffic back down
+# the tunnel to localhost:8742. This is the CGNAT-PROOF TLS path: the site becomes
+# reachable AND gets a managed TLS certificate without opening any inbound port.
+#
+# PREREQUISITE: the artelonga.com.br domain's DNS must be managed by Cloudflare
+# (move the nameservers to Cloudflare at your registrar first).
+#
+# SETUP
+# -----
+#   brew install cloudflared
+#   cloudflared tunnel login                       # browser auth, picks the zone
+#   cloudflared tunnel create co                   # creates tunnel + credentials JSON
+#       # → prints the Tunnel UUID and writes ~/.cloudflared/<UUID>.json
+#   # Point DNS at the tunnel (creates the CNAME records in Cloudflare DNS):
+#   cloudflared tunnel route dns co co.artelonga.com.br
+#   cloudflared tunnel route dns co www.co.artelonga.com.br
+#
+#   # Copy this file and fill in the placeholders below:
+#   cp scripts/selfhost/cloudflared-config.example.yml ~/.cloudflared/config.yml
+#
+#   # Test in the foreground:
+#   cloudflared tunnel --config ~/.cloudflared/config.yml run co
+#
+#   # Install as a background service (starts at boot, survives logout):
+#   sudo cloudflared --config ~/.cloudflared/config.yml service install
+#   sudo launchctl start com.cloudflare.cloudflared   # (label may vary)
+#
+# Replace <UUID> with the tunnel UUID from `tunnel create`, and <USER> with your
+# macOS username. If you changed CO_WEB_PORT, update the service URLs below to match.
+
+tunnel: <UUID>
+credentials-file: /Users/<USER>/.cloudflared/<UUID>.json
+
+# Optional: keep long uploads / websockets alive.
+originRequest:
+  connectTimeout: 30s
+  noTLSVerify: false
+
+ingress:
+  - hostname: co.artelonga.com.br
+    service: http://localhost:8742
+  - hostname: www.co.artelonga.com.br
+    service: http://localhost:8742
+  # Catch-all: anything not matched above returns 404 (required last rule).
+  - service: http_status:404
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Alternative: Caddy reverse proxy (only if you HAVE a public IP / can port-forward).
+#
+# If the machine is NOT behind CGNAT and you can forward inbound 80/443 to it,
+# Caddy gives you automatic Let's Encrypt TLS without Cloudflare. Cloudflared is
+# preferred for home/CGNAT setups; Caddy is the public-IP path.
+#
+#   brew install caddy
+#   # /usr/local/etc/Caddyfile (or wherever brew put it):
+#
+#       co.artelonga.com.br, www.co.artelonga.com.br {
+#           reverse_proxy 127.0.0.1:8742
+#       }
+#
+#   sudo caddy run --config /usr/local/etc/Caddyfile     # foreground test
+#   sudo brew services start caddy                        # background service
+#
+# Caddy provisions + renews the cert automatically (ports 80/443 must reach it,
+# and the A record must point at your public IP). With Caddy you can keep co-web
+# loopback-only (run.sh --localhost) since Caddy is the only thing talking to it.

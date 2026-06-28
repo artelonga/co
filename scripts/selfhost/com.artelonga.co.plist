@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  launchd LaunchAgent for co-web self-host.
+
+  Keeps the co-web server running and restarts it on crash (KeepAlive).
+
+  SETUP
+  -----
+  1. Replace every <USER> below with your macOS short username (output of `whoami`).
+     Replace the repo path if you cloned somewhere other than the example.
+  2. Provide JWT_SECRET. run.sh REFUSES to start without it (and co-web's CO-469
+     check PANICS at boot in a prod env on the insecure dev fallback). Two options:
+       a) inline it in <EnvironmentVariables> below (uncomment the JWT_SECRET key), OR
+       b) RECOMMENDED — keep it out of this file and source it from a 0600 file:
+            mkdir -p ~/.co && umask 077
+            printf 'export JWT_SECRET=%s\n' "$(openssl rand -base64 48)" > ~/.co/secrets.env
+            chmod 600 ~/.co/secrets.env
+          then either `source ~/.co/secrets.env` before `launchctl load`, or add a
+          one-line `[ -f ~/.co/secrets.env ] && . ~/.co/secrets.env` at the top of
+          run.sh. Keeping the secret out of a plist you might share is safer.
+     Generate once (keep STABLE — rotating it invalidates every session):
+         openssl rand -base64 48
+  3. Install:
+       cp scripts/selfhost/com.artelonga.co.plist ~/Library/LaunchAgents/
+       launchctl load -w ~/Library/LaunchAgents/com.artelonga.co.plist
+  4. Manage:
+       launchctl list | grep artelonga.co       # is it loaded?
+       launchctl unload ~/Library/LaunchAgents/com.artelonga.co.plist
+       launchctl kickstart -k gui/$(id -u)/com.artelonga.co   # restart
+  5. Logs:
+       tail -f ~/Library/Logs/co/web.log
+       tail -f ~/Library/Logs/co/web.err
+
+  NOTE: a LaunchAgent runs only while the user is logged in. For headless 24/7
+  operation, also disable sleep (caffeinate / pmset; see docs/SELF-HOST.md).
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.artelonga.co</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/<USER>/projects/co/scripts/selfhost/run.sh</string>
+    </array>
+
+    <!-- Run from the repo root so relative paths resolve consistently. -->
+    <key>WorkingDirectory</key>
+    <string>/Users/<USER>/projects/co</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Restart the server whenever it exits (crash, OOM, etc.). -->
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <!-- Persistent data dir (meta.db + universes/<key>/data.db). -->
+        <key>CO_WEB_DATA</key>
+        <string>/Users/<USER>/.co/data</string>
+
+        <!-- Listen port (default 8742). Match cloudflared-config / Caddy. -->
+        <key>CO_WEB_PORT</key>
+        <string>8742</string>
+
+        <!-- Network self-host: bind 0.0.0.0 + prod env. run.sh sets these too;
+             setting them here makes the launchd env explicit. For loopback-only,
+             change CO_WEB_HOST to 127.0.0.1 (or run run.sh with --localhost). -->
+        <key>CO_WEB_HOST</key>
+        <string>0.0.0.0</string>
+        <key>CO_ENV</key>
+        <string>prod</string>
+
+        <!-- Homebrew + system + cargo bins on PATH so `cargo`/`co-web` resolve
+             under launchd (launchd does NOT inherit your shell PATH). Adjust for
+             Intel Macs: /usr/local/bin instead of /opt/homebrew/bin. -->
+        <key>PATH</key>
+        <string>/Users/<USER>/.cargo/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+
+        <!-- REQUIRED: HS256 session signing key. Either uncomment + set here, or
+             source it from run.sh / a 0600 file (see header note 2). Generate once:
+                 openssl rand -base64 48
+        <key>JWT_SECRET</key>
+        <string>REPLACE_WITH_openssl_rand_base64_48</string>
+        -->
+
+        <!-- OPTIONAL: admin seed (password-login + admin dashboard gate).
+        <key>CO_SEED_ADMIN_EMAIL</key>
+        <string>you@example.com</string>
+        <key>CO_SEED_ADMIN_PASSWORD_HASH</key>
+        <string>REPLACE_WITH_argon2_hash</string>
+        -->
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/Users/<USER>/Library/Logs/co/web.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/<USER>/Library/Logs/co/web.err</string>
+</dict>
+</plist>
