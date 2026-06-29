@@ -2,7 +2,7 @@
 
 **Snapshot:** 2026-06-05 · workspace 2.40.0
 **Source:** `co-web/src/server.rs` + sub-routers in `*_routes.rs` and `storage_dashboard.rs`.
-**Cross-reference:** the interactions registry (`co-web/e2e/interactions/registry.yaml`) is exposed at **`GET /api/v1/interactions/openapi.json`** as an OpenAPI 3.1 surface. That registry is the canonical typed contract for the *content* operations (entries, vault, references). Auth/admin/quilombo/chat are NOT yet in the registry — they're documented here only.
+**Cross-reference:** the interactions registry (`co-web/e2e/interactions/registry.yaml`) is exposed at **`GET /api/v1/interactions/openapi.json`** as an OpenAPI 3.1 surface. That registry is the canonical typed contract for the *content* operations (entries, vault, references). Auth/admin/chat are NOT yet in the registry — they're documented here only.
 
 ## How to add a route
 
@@ -146,7 +146,6 @@ from `.route("/", ...)` nested at `/api/v1/universes` — verified manually.
 | GET | `/api/v1/universes/{slug}/jobs/doc-gen/last-error` | owner | Last doc-gen job error |
 | GET | `/api/v1/universes/{slug}/invitations` | owner | List universe invitations |
 | POST | `/api/v1/universes/apply-template-all` | admin | Apply template across all universes |
-| GET | `/api/v1/universes/quilomboaraucaria/stats` | anon | Special-cased stats (CO-41) |
 | POST | `/api/v1/universes/{slug}/invitations` | authed | Create invitation (CO-188) |
 | POST | `/api/v1/universes/{slug}/invites` | owner | Create invite — `{email\|handle, role}` (CO-444; API-token accepted) |
 | GET | `/api/v1/universes/{slug}/invites` | owner | List pending invites (CO-444) |
@@ -512,6 +511,7 @@ Content management via GitHub PAT. Routes under `/api/v1/gestao/` gated by `GEST
 | GET | `/api/v1/gestao/universos/indisponiveis` | admin (gh) | CO-406 — list universes the pool marks unavailable |
 | POST | `/api/v1/gestao/universos/{key}/reabrir` | admin (gh) | CO-406 — reopen a degraded universe (no restart) |
 | GET | `/api/v1/gestao/analytics/resumo` | admin (gh) | CO-378 — analytics resumo with private-path visibility |
+| GET | `/api/v1/gestao/atividades` | admin | Paginated audit log (`limit`/`since`/`acao` filters), `atividades` table |
 | GET | `/gestao` | admin (gh) | CO-361 — gestao SPA shell page |
 | POST | `/api/v1/gestao/webhooks` | admin (gh) | CO-168 register outbound webhook |
 | GET | `/api/v1/gestao/webhooks` | admin (gh) | List webhooks |
@@ -795,70 +795,6 @@ CO-333 feedback system. Submissions are public; management is owner-only.
 
 ---
 
-## quilombo — `/api/v1/quilombo/*` (quilombo_routes.rs, 1152 LoC)
-
-CO-41 hosted-tenant: parallel community CMS. Separate auth, content types, admin.
-
-**Public routes**
-
-| Method | Path | Auth | Purpose |
-|---|---|---|---|
-| GET | `/api/v1/quilombo/publicacoes` | anon | List published relatos |
-| GET | `/api/v1/quilombo/publicacoes/{slug}` | anon | Get relato by slug |
-| GET | `/api/v1/quilombo/paginas/{slug}` | anon | Get static page |
-| GET | `/api/v1/quilombo/eventos` | anon | List eventos |
-| GET | `/api/v1/quilombo/eventos/{id}` | anon | Get evento by ID |
-| GET | `/api/v1/quilombo/eventos/slug/{slug}` | anon | Get evento by slug |
-| GET | `/api/v1/quilombo/missoes` | anon | List missoes |
-| GET | `/api/v1/quilombo/missoes/{id}` | anon | Get missao with participants |
-| GET | `/api/v1/quilombo/membros` | anon | List membros |
-| GET | `/api/v1/quilombo/membros/{usuario}` | anon | Member public profile |
-| GET | `/api/v1/quilombo/comentarios` | anon | List comments |
-| POST | `/api/v1/quilombo/comentarios` | anon | Post comment (anonymous allowed) |
-| POST | `/api/v1/quilombo/contato` | anon | Contact form |
-| GET | `/api/v1/quilombo/tags` | anon | All tags |
-| GET | `/api/v1/quilombo/tags/{tag}` | anon | Relatos by tag |
-| GET | `/api/v1/quilombo/upload/{filename}` | anon | Serve upload file |
-| GET | `/api/v1/quilombo/fotos/{filename}` | anon | Serve photo file |
-
-**Autenticado (JWT quilombo)**
-
-| Method | Path | Auth | Purpose |
-|---|---|---|---|
-| POST | `/api/v1/quilombo/auth/login` | anon | Quilombo login (user+password) |
-| POST | `/api/v1/quilombo/auth/cadastro` | anon | Quilombo registration |
-| POST | `/api/v1/quilombo/auth/link-co-account` | authed | Link to CO account |
-| GET | `/api/v1/quilombo/perfil` | authed | My quilombo profile |
-| PUT | `/api/v1/quilombo/perfil` | authed | Update profile |
-| GET | `/api/v1/quilombo/mensagens` | authed | My messages |
-| POST | `/api/v1/quilombo/mensagens` | authed | Send message |
-| POST | `/api/v1/quilombo/missoes/criar` | authed | Create missao (admin) |
-| POST | `/api/v1/quilombo/missoes/{id}/participar` | authed | Join missao |
-| PUT | `/api/v1/quilombo/missoes/{id}/participacoes/{uid}` | authed | Approve/reject participation |
-| POST | `/api/v1/quilombo/eventos/criar` | authed | Create evento (admin) |
-| PUT | `/api/v1/quilombo/eventos/{id}/editar` | authed | Update evento (admin) |
-| POST | `/api/v1/quilombo/eventos/{id}/excluir` | authed | Delete evento (admin) |
-
-**Admin quilombo**
-
-| Method | Path | Auth | Purpose |
-|---|---|---|---|
-| GET | `/api/v1/quilombo/admin/telemetria` | admin | Telemetria quilombo |
-| GET | `/api/v1/quilombo/admin/resumo` | admin | Admin summary |
-| GET | `/api/v1/quilombo/admin/usuarios` | admin | List users |
-| PUT | `/api/v1/quilombo/admin/usuarios/{id}` | admin | Update user |
-| GET | `/api/v1/quilombo/admin/atividades` | admin | Activity log |
-
-**Processos (CO-329 web-edit workflow)**
-
-| Method | Path | Auth | Purpose |
-|---|---|---|---|
-| GET | `/api/v1/quilombo/alterar-pagina-na-web/runs` | authed | List web-edit runs |
-| POST | `/api/v1/quilombo/alterar-pagina-na-web/preview` | authed | Preview change |
-| POST | `/api/v1/quilombo/alterar-pagina-na-web/approve/{run_id}` | authed | Approve run |
-| POST | `/api/v1/quilombo/alterar-pagina-na-web/revert` | authed | Revert run |
-
----
 
 ## board (legacy) — `/api/projects/*`
 
