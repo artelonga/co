@@ -608,7 +608,7 @@ impl Storage {
 
     /// CO-173: list every universe the user has any relation to (owner / member /
     /// subscriber), each with a metadata bag pulled from the source-of-truth for
-    /// that universe. Quilombo metadata is folded in via `quilombo_usuarios.linked_co_user_id`.
+    /// that universe.
     ///
     /// Cross-deployment universes are out of scope until CO-172v2 lands an API mesh.
     pub fn list_universes_with_metadata_for_user(
@@ -617,31 +617,6 @@ impl Storage {
     ) -> Vec<crate::models::UserUniverseEntry> {
         // 1. Universe membership/role (owner row reflected via owner_id check).
         let universes = self.list_universes_for_user(user_id);
-
-        // 2. Pre-fetch the user's quilombo profile (if any) keyed by linked_co_user_id.
-        //    The columns we surface in metadata: papel, bio, foto_url, telefone, email.
-        let quilombo_meta: Option<serde_json::Value> = self
-            .conn
-            .query_row(
-                "SELECT papel, bio, foto_url, telefone, email \
-                 FROM quilombo_usuarios WHERE linked_co_user_id = ?1",
-                params![user_id],
-                |row| {
-                    let papel: String = row.get::<_, String>(0).unwrap_or_default();
-                    let bio: Option<String> = row.get(1).ok();
-                    let foto_url: Option<String> = row.get(2).ok();
-                    let telefone: Option<String> = row.get(3).ok();
-                    let email: Option<String> = row.get(4).ok();
-                    Ok(serde_json::json!({
-                        "papel": papel,
-                        "bio": bio,
-                        "foto_url": foto_url,
-                        "telefone": telefone,
-                        "email": email,
-                    }))
-                },
-            )
-            .ok();
 
         // 3. Pre-fetch role + joined_at per universe from `universe_members`.
         //    SQLite doesn't have a clean tuple-IN, so fetch the full set for the user.
@@ -711,16 +686,6 @@ impl Storage {
                         serde_json::Value::String(joined.clone()),
                     );
                 }
-                // Quilombo metadata only attaches to the quilomboaraucaria universe.
-                if u.key == "quilomboaraucaria"
-                    && let Some(meta) = quilombo_meta.as_ref()
-                    && let Some(obj) = meta.as_object()
-                {
-                    for (k, v) in obj {
-                        metadata.insert(k.clone(), v.clone());
-                    }
-                }
-
                 crate::models::UserUniverseEntry {
                     key: u.key,
                     name: u.name,
@@ -1058,7 +1023,7 @@ impl Storage {
         if self.get_universe(universe_key).is_none() {
             anyhow::bail!("Universe '{}' not found", universe_key);
         }
-        // Note: user_id may refer to a quilombo user (not in the users table) — no FK check.
+        // Note: user_id is not FK-checked against the users table here.
         let now = Utc::now();
         let now_str = now.to_rfc3339();
         self.conn.execute(

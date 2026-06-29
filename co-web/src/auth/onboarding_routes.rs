@@ -415,13 +415,6 @@ async fn onboard_verify_handler(
                     tracing::warn!("onboard-create: default subscriptions failed for {id}: {e}");
                 }
 
-                // CO-184 reverse bridge.
-                if let Err(e) = storage.ensure_quilombo_user_for_co(&id) {
-                    tracing::warn!(
-                        "onboard-create: ensure_quilombo_user_for_co failed for {id}: {e}"
-                    );
-                }
-
                 // ensure_email_recovery_channel so /forgot-password works.
                 if let Err(e) = storage.ensure_email_recovery_channel(&id, &email_normalized) {
                     tracing::warn!(

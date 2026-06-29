@@ -31,14 +31,13 @@ fn test_config(dir: &std::path::Path) -> WebConfig {
         experiments: true,
         plugins_dir: "plugins".to_string(),
         game_db_path: None,
-        universo_dir: "quilomboaraucaria".to_string(),
+        universo_dir: "universo".to_string(),
         gestao_github_admins: vec!["artelonga".to_string()],
         universe_key: None,
         co_env: "prod".into(),
         wae_endpoint: None,
         wae_api_key: None,
         cookie_domain: None,
-        quilombo_legacy_login: true,
         bypass_rate_limit: false,
     }
 }

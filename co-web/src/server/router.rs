@@ -122,8 +122,6 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             HeaderName::from_static("x-admin-override-quota"),
         ]);
 
-    let quilombo_api = crate::quilombo_routes::router(state.clone());
-
     // CO-435: admin auth now goes through the `AdminAuthProvider` trait. We
     // inject a single shared `Arc<dyn AdminAuthProvider>` (the GitHub default)
     // as an Extension; the `require_github_admin` middleware depends on the
@@ -440,22 +438,11 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             .nest("/api", experiment_api)
             .nest("/api", game_public)
             .nest("/api", game_protected)
-            .nest("/api/v1/quilombo", quilombo_api)
             // CO-385: conflict resolution endpoints (auth enforced in sub-router).
             .nest("/api/v1", sync_conflict_api)
             .layer(axum::middleware::from_fn_with_state(
                 state.clone(),
                 crate::telemetry::telemetry_middleware,
-            ))
-            .layer(axum::middleware::from_fn_with_state(
-                state.clone(),
-                crate::quilombo_telemetria::telemetry_middleware,
-            ))
-            .layer(axum::middleware::from_fn(
-                crate::quilombo_telemetria::csrf_middleware,
-            ))
-            .layer(axum::middleware::from_fn(
-                crate::quilombo_telemetria::canonical_host_middleware,
             ))
             // CO-323: detect *.artelonga.com.br subdomains and store universe key
             // in request extensions so SPA-serving handlers can inject the bootstrap
@@ -606,7 +593,6 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             // CO-398: delivery pipeline webhook + metrics.
             .nest("/api/v1", delivery_api)
             .nest("/api/v1/universes", delivery_universe_api)
-            .nest("/api/v1/processos", crate::processos::router())
             .nest("/oauth", oauth_api)
             .nest("/api/v1/gestao/oauth", gestao_oauth_api)
             .route(

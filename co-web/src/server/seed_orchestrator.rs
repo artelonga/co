@@ -1,7 +1,7 @@
 use crate::config::WebConfig;
 use crate::storage::Storage;
 
-/// Seed all universe/project content on startup (template, quilombo, yggdrasil,
+/// Seed all universe/project content on startup (template, yggdrasil,
 /// CO public pages, timeline, cleanup passes). Idempotent.
 pub fn run_startup_seeds(config: &WebConfig) {
     let mut storage = Storage::new(&config.data_dir);
@@ -22,12 +22,6 @@ pub fn run_startup_seeds(config: &WebConfig) {
         );
     } else {
         tracing::info!("No template universe found — seeded fresh template");
-    }
-    // CO-41: seed quilomboaraucaria public universe once on first boot.
-    if !storage.quilombo_universe_exists() {
-        tracing::info!("Seeding quilomboaraucaria universe...");
-        storage.seed_quilombo_universe();
-        tracing::info!("quilomboaraucaria universe seeded (public, quilombo theme)");
     }
     // CO-38: seed Yggdrasil minigames hub once on first boot.
     if !storage.yggdrasil_universe_exists() {
@@ -50,7 +44,7 @@ pub fn run_startup_seeds(config: &WebConfig) {
         tracing::info!("CO-170: cleaned up {n_dropped} empty project stub(s)");
     }
     // CO-170 Phase B (1.88.0): surgical moves of misplaced project content.
-    // Per user direction: AL → artelonga, QA → quilomboaraucaria, CO-platform
+    // Per user direction: AL → artelonga, CO-platform
     // projects (API/CW/DS/PLT) consolidated under `co`, tutorial leaks dropped.
     // Idempotent: source matches no rows after first successful run.
     let n_moved = storage.migrate_co170_phase_b();
@@ -73,7 +67,6 @@ pub fn run_startup_seeds(config: &WebConfig) {
     let _ = storage.conn().execute_batch(
         r#"
         UPDATE universes SET local_repo_path='~/projects/ArteLonga', content_subdirs='["docs","content"]' WHERE key='artelonga' AND local_repo_path IS NULL;
-        UPDATE universes SET local_repo_path='~/projects/quilomboaraucaria', content_subdirs='["relatos","jardim","quadro","eventos","membros","modelos"]', remote_url='https://github.com/artelonga/quilomboaraucaria', remote_ref='main' WHERE key='quilomboaraucaria' AND local_repo_path IS NULL;
         UPDATE universes SET local_repo_path='~/projects/yggdrasil', content_subdirs='["docs","content"]' WHERE key='yggdrasil' AND local_repo_path IS NULL;
         UPDATE universes SET local_repo_path='~/projects/rfq-gateway', content_subdirs='["docs","content"]' WHERE key='rfq' AND local_repo_path IS NULL;
         UPDATE universes SET local_repo_path='~/projects/comunicacao', content_subdirs='["docs","content"]' WHERE key='comunicacao' AND local_repo_path IS NULL;
@@ -109,8 +102,6 @@ pub fn run_startup_seeds(config: &WebConfig) {
     // the JSON manifests in the binary are the source of truth, and
     // `upsert_entry_row` makes overwriting safe.
     storage.seed_all_timeline_universes();
-    // CO-142 Phase D: remove stale quilombo variants that have no documented purpose.
-    storage.delete_stale_quilombo_variants();
     // CO-142 Phase B: recompute content_count from each universe's entry DB.
     // Seed paths (reseed_template_content_pages, seed_timeline_universe, etc.)
     // call upsert_entry_row but not increment_universe_content_count; this
@@ -130,7 +121,6 @@ pub fn run_startup_seeds(config: &WebConfig) {
         "tempo",
         "humanity",
         "universo",
-        "quilomboaraucaria",
         "artelonga",
         "rfq",
         "co",
@@ -547,31 +537,6 @@ pub fn run_admin_seeding(config: &WebConfig) {
                 "Recovery channel backfill: {n_channels} user(s) have a verified email channel"
             );
         }
-        // CO-172 Phase 2: backfill recovery channels for linked quilombo users.
-        let n_quilombo = storage.backfill_quilombo_recovery_channels();
-        if n_quilombo > 0 {
-            tracing::info!("Quilombo recovery channel backfill: {n_quilombo} user(s) promoted");
-        }
-        // CO-176 deployment-readiness: surface unbridged quilombo users so
-        // operators can spot a regression. Counts `quilombo_usuarios`
-        // rows where `linked_co_user_id IS NULL` — every quilombo signup
-        // since 1.91.3 should be linked synchronously, so a non-zero
-        // count here means either pre-1.91.3 legacy rows or a bridge
-        // regression.
-        let unbridged: i64 = storage
-            .conn()
-            .query_row(
-                "SELECT COUNT(*) FROM quilombo_usuarios WHERE linked_co_user_id IS NULL",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap_or(0);
-        if unbridged > 0 {
-            tracing::warn!(
-                "CO-176 integrity: {unbridged} quilombo user(s) without linked_co_user_id — \
-                 legacy rows recover lazily via /recover, but new signups must always link"
-            );
-        }
         // 1.73.0 (Phase 8 step 3): backfill CAS blobs from existing
         // entries on every boot. Cheap after the first run (hash
         // collisions hit INSERT OR IGNORE no-op) — first run on prod
@@ -687,7 +652,6 @@ mod staging_gate_tests {
             wae_endpoint: None,
             wae_api_key: None,
             cookie_domain: None,
-            quilombo_legacy_login: true,
             bypass_rate_limit: false,
         }
     }

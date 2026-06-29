@@ -26,11 +26,6 @@ impl Storage {
             // CO-142 Phase C deletions
             "co-dev",
             "co-experience",
-            // CO-142 Phase D deletions
-            "qa-dev",
-            "quilombo-blog",
-            "quilombo-blog-2",
-            "quilombo-blog-3",
             // Test/anon residue without DB rows
             "prodtest1776629312",
             "anon-test-1775647138",

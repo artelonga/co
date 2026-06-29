@@ -19,7 +19,6 @@ pub fn run(port: u16, data: String, static_dir: String, default_variant: String)
         wae_endpoint: std::env::var("WAE_ENDPOINT").ok(),
         wae_api_key: std::env::var("WAE_API_KEY").ok(),
         cookie_domain: std::env::var("CO_COOKIE_DOMAIN").ok(),
-        quilombo_legacy_login: true,
         bypass_rate_limit: false,
     };
 

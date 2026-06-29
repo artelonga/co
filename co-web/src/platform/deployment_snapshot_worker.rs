@@ -58,14 +58,6 @@ static REGISTRY_UNITS: &[RegistryUnit] = &[
         probe_health: true,
     },
     RegistryUnit {
-        key: "quilombo",
-        parent: None,
-        surface_dns: Some("quilomboaraucaria.org"),
-        fly_app: Some("quilomboaraucaria"),
-        display: "quilomboaraucaria",
-        probe_health: true,
-    },
-    RegistryUnit {
         key: "yggdrasil",
         parent: None,
         surface_dns: Some("yggdrasil.artelonga.com.br"),
@@ -409,8 +401,8 @@ mod tests {
     }
 
     #[test]
-    fn units_list_has_six_entries() {
-        assert_eq!(units().len(), 6);
+    fn units_list_has_five_entries() {
+        assert_eq!(units().len(), 5);
     }
 
     #[test]
@@ -448,7 +440,6 @@ mod tests {
         // Deployable surfaces resolve to their own DNS root.
         assert_eq!(url("co"), "https://co.artelonga.com.br");
         assert_eq!(url("yggdrasil"), "https://yggdrasil.artelonga.com.br");
-        assert_eq!(url("quilombo"), "https://quilomboaraucaria.org");
         assert_eq!(url("rfq"), "https://rfq.fly.dev");
         // A sub-universe (no DNS) resolves through its deployable ancestor `co`.
         assert_eq!(

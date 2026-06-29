@@ -28,9 +28,9 @@ pub struct UserClaims {
     pub user_id: String,
     pub email: String,
     pub tier: String,
-    /// Quilombo username — empty for CO-only identities.
+    /// Username — empty when the identity has no username set.
     pub usuario: String,
-    /// Quilombo role — empty for CO-only identities.
+    /// Role — empty when the identity has no role set.
     pub papel: String,
 }
 

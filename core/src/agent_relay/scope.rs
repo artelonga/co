@@ -82,7 +82,7 @@ mod tests {
     use super::*;
 
     fn root() -> PathBuf {
-        PathBuf::from("/Users/yuri/projects/quilomboaraucaria")
+        PathBuf::from("/Users/yuri/projects/exemplo")
     }
 
     #[test]

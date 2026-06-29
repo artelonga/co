@@ -822,8 +822,8 @@ pub async fn list_trash(
 /// on either side are independent — no shared state. (Lineage tracking via
 /// `parent_universe_key` is CO-95 territory and not in this preview.)
 ///
-/// Use case: `quilomboaraucaria` → `quilombo-blog` for parallel testing,
-/// scalability analysis, or a materialized "dev branch" of any universe.
+/// Use case: a materialized "dev branch" of any universe for parallel testing,
+/// scalability analysis, or experimentation.
 pub async fn duplicate_universe(
     State(state): State<AppState>,
     Path(source_slug): Path<String>,
@@ -1292,15 +1292,6 @@ fn extract_optional_claims(headers: &HeaderMap) -> Option<crate::auth::Claims> {
     crate::auth::decode_claims(&token, &secret).ok()
 }
 
-// GET /api/v1/universes/quilomboaraucaria/stats — public stats endpoint (CO-41)
-pub async fn quilombo_stats(
-    State(state): State<AppState>,
-) -> Result<Json<crate::models::QuilomboStats>, AppError> {
-    let storage = lock_storage(&state);
-    let stats = storage.quilombo_stats();
-    Ok(Json(stats))
-}
-
 // GET /api/v1/universes/:slug/config — public: returns presentation config
 pub async fn get_universe_config(
     State(state): State<AppState>,
@@ -1656,8 +1647,6 @@ pub async fn patch_universe_source(
 pub fn router(state: AppState) -> Router<AppState> {
     // Public routes (no auth layer)
     let public_routes = Router::new()
-        // CO-41: specific literal route must come before /{slug} wildcard
-        .route("/quilomboaraucaria/stats", get(quilombo_stats))
         // CO-49: universe search (no auth required)
         .route("/search", get(search_universes))
         // 1.68.0: public listing for the SPA hub (anonymous-visitor-friendly)

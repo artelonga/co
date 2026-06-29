@@ -692,22 +692,6 @@ pub struct UpdateUniverseFormConfig {
 
 // --- Theme Tiers ---
 
-/// Stats for the `quilomboaraucaria` public universe.
-///
-/// Counts are derived from the SQLite entry index; totalUsuarios, versaoApp,
-/// and ultimaSync come from the `meta/stats.md` metadata entry written by the
-/// importer on each run.
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct QuilomboStats {
-    pub total_usuarios: i64,
-    pub total_publicacoes: i64,
-    pub total_eventos: i64,
-    pub total_missoes: i64,
-    pub versao_app: String,
-    pub ultima_sync: Option<String>,
-}
-
 /// Available themes returned by `GET /api/v1/themes/available`.
 /// Content depends on whether the caller is a real logged-in user or anonymous.
 #[derive(Debug, Serialize)]
@@ -731,7 +715,7 @@ pub struct MeResponse {
     pub tier: String,
     /// CO-173: list of universes the user has any relation to (owner, member,
     /// or subscriber), each with a metadata bag pulled from the source-of-
-    /// truth for that universe (e.g. quilombo_usuarios for quilombo).
+    /// truth for that universe.
     /// Defaults to empty so older clients that only read user fields keep
     /// working.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -756,13 +740,11 @@ pub struct UserUniverseEntry {
     pub key: String,
     pub name: String,
     /// Best-effort role string. For CO universes: `"owner"` / `"admin"` / `"editor"` / `"viewer"`.
-    /// For quilombo (when linked): the `quilombo_usuarios.papel` (`admin` / `membro`).
     pub role: String,
     pub is_owner: bool,
     pub is_member: bool,
     pub is_subscriber: bool,
-    /// Universe-source-specific metadata. Quilombo: `{papel,bio,foto_url,telefone}`.
-    /// Default CO universe: `{joined_at}`.
+    /// Universe-source-specific metadata. Default CO universe: `{joined_at}`.
     pub metadata: serde_json::Value,
 }
 

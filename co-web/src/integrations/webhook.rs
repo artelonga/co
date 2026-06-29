@@ -3,7 +3,7 @@
 //! # Flow
 //! ```text
 //! request handler
-//!   └── emit_event("quilombo.evento.criado", payload)
+//!   └── emit_event("app.evento.criado", payload)
 //!         └── notifications table (status='pending')
 //!               └── webhook_worker (background, polls every 5 s)
 //!                     ├── claim row
@@ -458,7 +458,7 @@ pub fn hmac_signature(secret: &str, body: &[u8]) -> String {
 /// Returns true if `pattern` matches `event_type`.
 ///
 /// - `*` matches everything.
-/// - `quilombo.*` matches any event whose name starts with `quilombo.`.
+/// - `app.*` matches any event whose name starts with `app.`.
 /// - Otherwise exact string match.
 pub fn event_matches(pattern: &str, event_type: &str) -> bool {
     if pattern == "*" {
@@ -490,30 +490,24 @@ mod tests {
 
     #[test]
     fn wildcard_star_matches_everything() {
-        assert!(event_matches("*", "quilombo.evento.criado"));
+        assert!(event_matches("*", "app.evento.criado"));
         assert!(event_matches("*", "co.universe.criado"));
         assert!(event_matches("*", "anything"));
     }
 
     #[test]
     fn wildcard_prefix_matches_correct_namespace() {
-        assert!(event_matches("quilombo.*", "quilombo.evento.criado"));
-        assert!(event_matches("quilombo.*", "quilombo.missao.participou"));
-        assert!(event_matches("quilombo.*", "quilombo.mensagem.criada"));
-        assert!(!event_matches("quilombo.*", "co.universe.criado"));
-        assert!(!event_matches("quilombo.*", "quilomboextended.foo"));
+        assert!(event_matches("app.*", "app.evento.criado"));
+        assert!(event_matches("app.*", "app.missao.participou"));
+        assert!(event_matches("app.*", "app.mensagem.criada"));
+        assert!(!event_matches("app.*", "co.universe.criado"));
+        assert!(!event_matches("app.*", "appextended.foo"));
     }
 
     #[test]
     fn exact_match_works() {
-        assert!(event_matches(
-            "quilombo.evento.criado",
-            "quilombo.evento.criado"
-        ));
-        assert!(!event_matches(
-            "quilombo.evento.criado",
-            "quilombo.evento.atualizado"
-        ));
+        assert!(event_matches("app.evento.criado", "app.evento.criado"));
+        assert!(!event_matches("app.evento.criado", "app.evento.atualizado"));
     }
 
     // --- HMAC signature ---
@@ -573,7 +567,7 @@ mod tests {
 
         emit_event(
             storage.conn(),
-            "quilombo.evento.criado",
+            "app.evento.criado",
             &serde_json::json!({"id": 1}),
             None,
             None,
@@ -598,13 +592,13 @@ mod tests {
         create_webhook(
             storage.conn(),
             "https://example.com/hook",
-            &["quilombo.*".to_string()],
+            &["app.*".to_string()],
         )
         .unwrap();
 
         emit_event(
             storage.conn(),
-            "quilombo.evento.criado",
+            "app.evento.criado",
             &serde_json::json!({"id": 42}),
             None,
             None,
@@ -634,7 +628,7 @@ mod tests {
 
         emit_event(
             storage.conn(),
-            "quilombo.evento.criado",
+            "app.evento.criado",
             &serde_json::json!({}),
             None,
             None,
@@ -850,11 +844,19 @@ mod tests {
     fn emit_event_enqueues_email_when_resend_configured() {
         let _env = crate::test_support::env_lock_blocking();
         let _guard = EnvGuard::set("RESEND_API_KEY", "test-key");
+        let _subj = EnvGuard::set(
+            "CO_TPL_APP_EVENTO_CRIADO_EMAIL_SUBJECT",
+            "Novo evento: {{titulo}}",
+        );
+        let _body = EnvGuard::set(
+            "CO_TPL_APP_EVENTO_CRIADO_EMAIL_BODY",
+            "Olá {{nome}}: {{titulo}}",
+        );
         let (storage, _tmp) = make_storage();
 
         emit_event(
             storage.conn(),
-            "quilombo.evento.criado",
+            "app.evento.criado",
             &serde_json::json!({"titulo": "Festa", "nome": "Yuri"}),
             Some("yuri@example.com"),
             None,
@@ -880,7 +882,7 @@ mod tests {
 
         emit_event(
             storage.conn(),
-            "quilombo.evento.criado",
+            "app.evento.criado",
             &serde_json::json!({"titulo": "Festa"}),
             Some("yuri@example.com"),
             None,
@@ -904,11 +906,15 @@ mod tests {
         let _guard_key = EnvGuard::set("EVOLUTION_API_KEY", "test-key");
         let _guard_url = EnvGuard::set("EVOLUTION_API_URL", "https://api.example.com");
         let _guard_instance = EnvGuard::set("EVOLUTION_INSTANCE", "test");
+        let _wa = EnvGuard::set(
+            "CO_TPL_APP_EVENTO_CRIADO_WHATSAPP",
+            "Novo evento: {{titulo}}",
+        );
         let (storage, _tmp) = make_storage();
 
         emit_event(
             storage.conn(),
-            "quilombo.evento.criado",
+            "app.evento.criado",
             &serde_json::json!({"titulo": "Festa"}),
             None,
             Some("+5541999999999"),
@@ -934,7 +940,7 @@ mod tests {
 
         emit_event(
             storage.conn(),
-            "quilombo.evento.criado",
+            "app.evento.criado",
             &serde_json::json!({"titulo": "Festa"}),
             None,
             Some("+5541999999999"),

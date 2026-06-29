@@ -115,9 +115,6 @@ pub fn uat_startup(config: &WebConfig) -> bool {
         if !storage.template_exists() {
             storage.seed_template_universe();
         }
-        if !storage.quilombo_universe_exists() {
-            storage.seed_quilombo_universe();
-        }
         if !storage.yggdrasil_universe_exists() {
             storage.seed_yggdrasil_universe();
         }
@@ -143,13 +140,6 @@ pub fn uat_startup(config: &WebConfig) -> bool {
         if let Err(e) = storage.seed_uat_user(&hash) {
             tracing::error!("UAT: failed to seed yuri user: {e}");
         }
-
-        // Add yuri as member of quilomboaraucaria so it appears in their sidebar
-        let _ = storage.conn().execute(
-            "INSERT OR IGNORE INTO universe_members (universe_key, user_id, role, joined_at) \
-             VALUES ('quilomboaraucaria', 'usr_yuri_uat', 'admin', datetime('now'))",
-            rusqlite::params![],
-        );
 
         // --- Clean up anonymous universes from previous session ---
         let cleaned = storage.cleanup_anon_universes();

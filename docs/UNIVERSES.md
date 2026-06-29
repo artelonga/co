@@ -11,7 +11,6 @@ fresh database reproduces the same set).
 | Key | Name | Visibility | Owner | Seed path | Purpose |
 |-----|------|-----------|-------|-----------|---------|
 | `template` | CO | public-static | system | `seed_template_universe()` + `reseed_template_content_pages()` | Read-only onboarding board; source of anonymous clones |
-| `quilomboaraucaria` | Quilombo Araucária | public-subscribable | system | `seed_quilombo_universe()` | Official content universe for the quilombo community |
 | `yggdrasil` | Yggdrasil | requires-login | system | `seed_yggdrasil_universe()` | Minigames hub (CO-38) |
 | `dados` | Dados Rastreados | public-static | system | seeded externally | Privacy disclosure dataset |
 | `tempo` | Linha do Tempo | public-static | system | `seed_timeline_universe()` manifest | Universal timeline (CO-92) |
@@ -39,16 +38,12 @@ refreshed on every boot from the bundled `work/co/` snapshot (`/app/seed-co/`).
 ## Deprecated universes (hard-deleted on boot)
 
 These keys are deleted from the database on every `co-web` startup via
-`delete_deprecated_universes()` and `delete_stale_quilombo_variants()`.
+`delete_deprecated_universes()`.
 
 | Key | Reason for deletion |
 |-----|---------------------|
 | `co-dev` | CO-142: replaced by admin-only API + `co` work universe |
 | `co-experience` | CO-142: concept retired; tracking moves to `co` universe epics |
-| `quilombo-blog` | CO-142: manual experiment; content lives in `quilomboaraucaria` |
-| `quilombo-blog-2` | CO-142: duplicate experiment row, no distinct purpose |
-| `quilombo-blog-3` | CO-142: duplicate experiment row, no distinct purpose |
-| `qa-dev` | CO-142: QA scratch clone, no production purpose |
 
 ## Epic ↔ sub-universe decision (CO-142 Phase C)
 

@@ -175,16 +175,8 @@ pub use platform::wae;
 pub use platform::worker_supervisor;
 pub use platform::workers;
 
-// universes — quilombo (quilomboaraucaria.org backend)
 // storage — backup backend trait + implementations
 pub use storage::backup;
-
-pub use universes::quilombo::processos;
-pub use universes::quilombo::quilombo_models;
-pub use universes::quilombo::quilombo_permissoes;
-pub use universes::quilombo::quilombo_routes;
-pub use universes::quilombo::quilombo_storage;
-pub use universes::quilombo::quilombo_telemetria;
 
 // universes — game (yggdrasil leaderboard)
 pub use universes::game::game_models;

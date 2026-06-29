@@ -42,7 +42,6 @@ pub fn make_universe_router(
         wae_endpoint: None,
         wae_api_key: None,
         cookie_domain: None,
-        quilombo_legacy_login: true,
         bypass_rate_limit: false,
     };
     let experiment = ExperimentStore::new(dir);

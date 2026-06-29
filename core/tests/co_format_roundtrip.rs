@@ -1,5 +1,5 @@
 //! CO-86 — `.co` round-trip integration tests over a corpus of real-world
-//! content shapes (modeled on quilomboaraucaria + ArteLonga markdown).
+//! content shapes (modeled on sample community + ArteLonga markdown).
 //!
 //! Each fixture is encoded → bytes → decoded and asserted to reproduce the
 //! original body byte-for-byte with frontmatter equivalence (order-independent,
@@ -195,7 +195,7 @@ fn inspect_reports_all_fields() {
 }
 
 /// The survey-derived fixture corpus on disk (`tests/fixtures/co_format/`),
-/// modeled on real quilomboaraucaria + ArteLonga content. These exercise
+/// modeled on real sample community + ArteLonga content. These exercise
 /// shapes the inline corpus does not — notably `referencias.md`, whose
 /// frontmatter carries a list of heterogeneous mappings with integer fields
 /// (the hardest case for the `extra` Struct round-trip).

@@ -216,7 +216,7 @@ async fn test_dm_origin_default_null_and_explicit_kept() {
         "dm",
         &dm_slug,
         &token_a,
-        serde_json::json!({ "body": "te conheci no quilombo", "origin_universe_key": "shared-o5" }),
+        serde_json::json!({ "body": "te conheci no evento", "origin_universe_key": "shared-o5" }),
     )
     .await;
     assert_eq!(status, StatusCode::CREATED);
@@ -226,7 +226,7 @@ async fn test_dm_origin_default_null_and_explicit_kept() {
     // Messages come back newest-first.
     let with_origin = msgs
         .iter()
-        .find(|m| m["body"] == "te conheci no quilombo")
+        .find(|m| m["body"] == "te conheci no evento")
         .unwrap();
     let without_origin = msgs.iter().find(|m| m["body"] == "oi, sem origin").unwrap();
     assert_eq!(with_origin["origin_universe_key"], "shared-o5");

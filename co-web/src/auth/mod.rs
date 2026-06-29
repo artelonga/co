@@ -703,37 +703,6 @@ pub fn sign_jwt(
     Ok((token, expires_at))
 }
 
-/// Signs a unified JWT for quilombo community auth. Returns (token, expires_at).
-pub fn sign_jwt_quilombo(
-    user_id: &str,
-    usuario: &str,
-    papel: &str,
-    secret: &str,
-) -> anyhow::Result<(String, DateTime<Utc>)> {
-    let now = Utc::now();
-    let iat = now.timestamp() as usize;
-    let exp = (now.timestamp() + JWT_EXPIRY_SECS) as usize;
-    let expires_at = now + chrono::Duration::seconds(JWT_EXPIRY_SECS);
-
-    let claims = Claims {
-        sub: user_id.to_string(),
-        email: String::new(),
-        tier: papel.to_string(), // tier maps to papel for backwards compat
-        usuario: usuario.to_string(),
-        papel: papel.to_string(),
-        exp,
-        iat,
-    };
-
-    let token = encode(
-        &Header::new(Algorithm::HS256),
-        &claims,
-        &EncodingKey::from_secret(secret.as_bytes()),
-    )?;
-
-    Ok((token, expires_at))
-}
-
 /// Decode a JWT token and return the subject (user ID) if valid.
 pub fn decode_user_id(token: &str, secret: &str) -> anyhow::Result<String> {
     let mut validation = Validation::new(Algorithm::HS256);

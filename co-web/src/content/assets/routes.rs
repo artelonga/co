@@ -9,7 +9,7 @@
 //!   blobs/<aa>/<bb>/<sha256>     (raw bytes; plaintext in Phase 1)
 //! ```
 //!
-//! Phase 1 is plaintext to unblock the 506 MB quilomboaraucaria upload.
+//! Phase 1 is plaintext to unblock large content uploads.
 //! CO-148 (Phase 3) wraps every blob in ChaCha20-Poly1305 with a per-universe
 //! DEK, and adds `nonce` + `cipher_size` columns to the `assets` table.
 

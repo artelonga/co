@@ -47,9 +47,9 @@ pub(crate) const SEED_LICENSA_MD: &str = include_str!("../../seed/co/public/lice
 pub(crate) const SEED_RENDERERS_MD: &str = include_str!("../../seed/co/public/renderers.md");
 pub(crate) const SEED_INFRA_MD: &str = include_str!("../../seed/co/public/infra.md");
 pub(crate) const SEED_INFRA_CO_MD: &str = include_str!("../../seed/co/public/infra-co.md");
-// Cross-repo infra pages (infra-rfq-gateway, infra-yggdrasil, infra-quilomboaraucaria)
-// removed: their content belongs in the respective universe's content, not in CO's
-// public seed. Users get those docs by subscribing to the universe.
+// Cross-repo infra pages removed: their content belongs in the respective
+// universe's content, not in CO's public seed. Users get those docs by
+// subscribing to the universe.
 pub(crate) const SEED_TX_LOG_MD: &str = include_str!("../../seed/co/public/transaction-log.md");
 pub(crate) const SEED_CONTA_MD: &str = include_str!("../../seed/co/public/conta-e-mensagens.md");
 pub(crate) const SEED_CO_PUBLIC_INDEX_MD: &str = include_str!("../../seed/co/public/index.md");
@@ -193,7 +193,7 @@ impl Storage {
         self.data_dir.join("universes").join(universe_key)
     }
 
-    /// Access the underlying meta.db connection (for auth, users, universes, quilombo).
+    /// Access the underlying meta.db connection (for auth, users, universes).
     pub fn conn(&self) -> &Connection {
         &self.conn
     }
@@ -258,7 +258,6 @@ pub mod notifications;
 pub(crate) mod onboarding;
 pub(crate) mod projects;
 pub mod push_subscriptions;
-pub(crate) mod quilombo_bridge;
 pub mod read_pool;
 pub(crate) mod recompute;
 pub(crate) mod release_notes;

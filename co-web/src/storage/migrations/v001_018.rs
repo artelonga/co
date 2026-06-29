@@ -79,8 +79,32 @@ impl Storage {
                 .expect("Failed to run migration v2");
         }
 
-        // Quilombo community tables (v3, v4)
-        crate::quilombo_storage::run_quilombo_migrations(&self.conn);
+        // CO-509: versions 3, 4, 5 were historically owned by the (now-removed)
+        // embedded tenant migration, which created tenant-only tables and
+        // reserved those schema_version numbers. The tenant code is gone, so we
+        // no longer create those tables, but we still reserve the version
+        // numbers to keep the migration chain contiguous and preserve the exact
+        // downstream guard behaviour (the `< 5` block below stays skipped on a
+        // fresh DB, just as it did when the tenant migration ran first).
+        {
+            let v: i64 = self
+                .conn
+                .query_row(
+                    "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap_or(0);
+            if v < 5 {
+                self.conn
+                    .execute_batch(
+                        "INSERT OR IGNORE INTO schema_version (version) VALUES (3);
+                         INSERT OR IGNORE INTO schema_version (version) VALUES (4);
+                         INSERT OR IGNORE INTO schema_version (version) VALUES (5);",
+                    )
+                    .expect("Failed to reserve schema versions 3-5 (CO-509)");
+            }
+        }
 
         let current_version: i64 = self
             .conn
@@ -157,7 +181,7 @@ impl Storage {
 
         if current_version < 9 {
             // Recreate universe_members without the FK on user_id so that
-            // quilombo users (stored in quilombo_usuarios, not users) can be members.
+            // external/bridged users (not stored in the `users` table) can be members.
             self.conn
                 .execute_batch(
                     "

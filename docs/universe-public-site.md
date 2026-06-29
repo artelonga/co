@@ -18,8 +18,8 @@ the public site is a **static build** — no CO chrome, no login, no editing.
   (`static/shared/markdown.js`). There is no SSR/reader mode.
 - **Static public sites are bespoke per-universe apps**: `retro-umarizal` ships its own
   `deploy/fly.toml` + `tools/retro-server.mjs` (hand-authored HTML on Fly app
-  `artelonga-retro` at `retroumarizal.artelonga.com.br`); `quilombo-blog` is a separate
-  SvelteKit app. Not generalized, not generated from the universe's markdown.
+  `artelonga-retro` at `retroumarizal.artelonga.com.br`). These are separate, standalone
+  apps — not generalized, not generated from the universe's markdown.
 - **The canonical generator already exists**: `redearte` is a **Quartz** instance
   (`jackyzha0/quartz`) — markdown → static digital-garden site with native
   `[[wikilink]]`, backlink, and graph rendering. This is the `construir` (build) tool the
@@ -66,7 +66,6 @@ Privacy carries over: only published/public entries are built into the static si
 | Universe | Board (co.artelonga.com.br/…) | Public static site |
 |---|---|---|
 | `artelonga` | ✅ app | agency site (today bespoke) → could move to construir |
-| `quilomboaraucaria` | ✅ app | `quilombo-blog` (SvelteKit) — keep, or converge on construir |
 | `comunicacao` | ✅ app | Quartz garden (lexicon) — strong fit |
 | `yggdrasil` | ✅ app | notes garden — fit |
 | `retro-umarizal` | ✅ app | `artelonga-retro` (bespoke HTML) — the precedent construir generalizes |
