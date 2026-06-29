@@ -87,6 +87,58 @@ run() {
 TS="$(date -u +%Y%m%dT%H%M%SZ)"
 REMOTE_TAR="/tmp/co-data-${TS}.tar.gz"
 
+# ── Telemetry / observability migration verify (CO-538) ──────────────────────
+# After the /data tar is restored, PROVE the telemetry history came across:
+#   (a) count telemetry_events AFTER (the migrated history) — and BEFORE from the
+#       pre-migrate target snapshot if step 3 took one, so the operator sees the
+#       delta and can confirm it matches Fly.
+#   (b) count telemetry_archives rows (the cold-month Parquet manifest).
+#   (c) assert the telemetry-archive/ dir (cold telemetry months, CO-449) made it
+#       across — WARN, not fail, since archival is opt-in and may never have run.
+# Read-only; safe to call after restore. Needs sqlite3 for the counts.
+verify_telemetry() {
+  local meta="$DATA_DIR/meta.db"
+  if ! command -v sqlite3 >/dev/null 2>&1; then
+    say "telemetry verify skipped — sqlite3 not on PATH (install it to confirm telemetry_events migrated)."
+    return 0
+  fi
+
+  # (a) BEFORE — the pre-migrate target snapshot from step 3 (if any), for a delta.
+  if [ -n "${BACKUP_TAR:-}" ] && [ -f "${BACKUP_TAR:-}" ]; then
+    local pre_dir pre_meta before
+    pre_dir="$(mktemp -d "${TMPDIR:-/tmp}/co-telemetry-before.XXXXXX")"
+    tar xzf "$BACKUP_TAR" -C "$pre_dir" 2>/dev/null || true
+    pre_meta="$(find "$pre_dir" -name meta.db -print 2>/dev/null | head -1)"
+    if [ -n "$pre_meta" ]; then
+      before="$(sqlite3 "$pre_meta" "SELECT count(*) FROM telemetry_events" 2>/dev/null || echo '?')"
+      say "telemetry_events BEFORE (pre-migrate target snapshot): ${before}"
+    fi
+    rm -rf "$pre_dir"
+  fi
+
+  # (a) AFTER — the freshly restored estate (this IS the migrated history).
+  if [ -f "$meta" ]; then
+    local after archives
+    after="$(sqlite3 "$meta" "SELECT count(*) FROM telemetry_events" 2>/dev/null || echo '?')"
+    say "telemetry_events AFTER  (restored $meta): ${after}  ← confirm this matches Fly's count"
+    # (b) cold-month manifest rows.
+    archives="$(sqlite3 "$meta" "SELECT count(*) FROM telemetry_archives" 2>/dev/null || echo '?')"
+    say "telemetry_archives rows (cold-month Parquet manifest): ${archives}"
+  else
+    err "restored meta.db not found at $meta — cannot count telemetry_events."
+  fi
+
+  # (c) cold telemetry lives on disk under telemetry-archive/ (CO-449). The
+  # `-C /data .` tar should have carried it across; warn (don't fail) if absent.
+  if [ -d "$DATA_DIR/telemetry-archive" ]; then
+    local n
+    n="$(find "$DATA_DIR/telemetry-archive" -name '*.parquet' 2>/dev/null | wc -l | tr -d ' ')"
+    say "telemetry-archive/ present — ${n} Parquet cold-tier file(s) restored."
+  else
+    say "WARNING: telemetry-archive/ NOT found under $DATA_DIR — cold telemetry months may be missing (ok if archival was never enabled, i.e. CO_TELEMETRY_ARCHIVE_ENABLED=false on Fly)."
+  fi
+}
+
 if [ "$APPLY" -eq 0 ]; then
   say "DRY-RUN — nothing will be changed. Re-run with --apply to perform the migration."
 fi
@@ -175,6 +227,9 @@ step "5/5 — verify the restored estate"
 if [ "$DO_VERIFY" -eq 0 ]; then
   say "verification skipped (--no-verify). Run smoke-selfhost.sh + verify-restore.sh manually."
 elif [ "$APPLY" -eq 0 ]; then
+  echo "  (dry-run) sqlite3 $DATA_DIR/meta.db 'SELECT count(*) FROM telemetry_events'   # migrated telemetry history"
+  echo "  (dry-run) sqlite3 $DATA_DIR/meta.db 'SELECT count(*) FROM telemetry_archives' # cold-month manifest"
+  echo "  (dry-run) check $DATA_DIR/telemetry-archive/ exists (cold telemetry months, CO-449)"
   echo "  (dry-run) CO_WEB_DATA=$DATA_DIR bash $SCRIPT_DIR/smoke-selfhost.sh"
   echo "  (dry-run) CO_WEB_DATA=$DATA_DIR bash $SCRIPT_DIR/selfhost/verify-restore.sh"
 else
@@ -184,6 +239,10 @@ else
     ( cd "$REPO_ROOT" && cargo run -q -p co-web --bin audit_serve -- "$DATA_DIR" ) \
       || err "audit_serve reported a leak surface — review before serving publicly."
   fi
+  # Telemetry/observability proof — confirm the telemetry history + cold archive
+  # came across in the /data tar (CO-538). Read-only; counts via sqlite3.
+  say "verifying telemetry migrated (telemetry_events count + telemetry-archive/) ..."
+  verify_telemetry
   # Boot a co-web (the operator should already have it running via run.sh/launchd);
   # smoke against it. This asserts capabilities, not content counts (content-agnostic).
   say "running smoke-selfhost.sh against the local server (start co-web first if not up) ..."

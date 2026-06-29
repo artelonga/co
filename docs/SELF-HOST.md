@@ -23,7 +23,7 @@ Three cutover/ops helpers live alongside, in [`scripts/`](../scripts/):
 
 | Script | Purpose |
 |--------|---------|
-| `smoke-selfhost.sh` | Content-agnostic capability smoke — **the self-host replacement for `smoke-prod.sh`** (CO-536). Health + version + clean serve-allowlist + an opt-in auth/CRUD round-trip; no pinned seed counts, tenant names, or Fly URLs. |
+| `smoke-selfhost.sh` | Content-agnostic capability smoke — **the self-host replacement for `smoke-prod.sh`** (CO-536). Health + version + clean serve-allowlist + an opt-in auth/CRUD round-trip + a telemetry-liveness check (CO-538); no pinned seed counts, tenant names, or Fly URLs. |
 | `disk-gate-selfhost.sh` | Local `df` disk pre-flight (CO-537) — blocks an upgrade at >85% full (mirrors CO-446), warns at >75%. No flyctl. |
 | `migrate-fly-to-m4.sh` | One-time Fly → M4 data migration (dry-run by default, `--apply` to execute). |
 
@@ -196,6 +196,38 @@ scripts/selfhost/run.sh
 ```
 
 ---
+
+## 4b. Telemetry on self-host
+
+Telemetry (CO-46) runs the same on self-host as on Fly — `telemetry_middleware`
+records privacy-respecting pageviews/events with **no PII** (daily-salted IP hash,
+no raw IP/email/content). Where it lives and how to keep it whole:
+
+- **Storage = `meta.db` + a local cold archive.** Hot events live in the
+  `telemetry_events` table inside `$CO_WEB_DATA/meta.db` (so Litestream already
+  backs them up). When archival is enabled, cold months move to Parquet under
+  `$CO_WEB_DATA/telemetry-archive/` (CO-449) — keep that directory in your
+  companion `universes/`-style snapshot so cold telemetry is backed up too.
+- **Turn on cold-tier archival** so `telemetry_events` doesn't bloat `meta.db`
+  (and push the disk back over the CO-537 gate):
+  `CO_TELEMETRY_ARCHIVE_ENABLED=true`, `CO_TELEMETRY_HOT_DAYS=90` (default),
+  optional `CO_TELEMETRY_ARCHIVE_INTERVAL_SECS=86400`.
+- **GeoLite2 is required for country/city enrichment.** `geo.rs` reads a MaxMind
+  GeoLite2 DB from `GEOIP_DB_PATH` (default `/data/GeoLite2-City.mmdb`); **absent →
+  geo is silently disabled** (NULL country/city). Download `GeoLite2-City.mmdb`
+  (free MaxMind account) and point `GEOIP_DB_PATH` at it
+  (e.g. `~/.co/data/GeoLite2-City.mmdb`).
+- **Optional external traces/metrics:** `CO_TELEMETRY_OTLP_ENDPOINT` (gRPC),
+  `CO_TELEMETRY_SERVICE_NAME` (default `co-web`), `CO_TELEMETRY_SAMPLING_RATIO`
+  (default `1.0`).
+- **`smoke-selfhost.sh` now checks telemetry liveness** (`[04]`): the public
+  analytics surface (`/api/v1/analytics/public/summary`) must answer (a 5xx is a
+  hard fail), and — when `sqlite3` + `$CO_WEB_DATA/meta.db` are present — it
+  asserts the `telemetry_events` table exists and reports its row count (a live
+  prod should be > 0 and growing).
+
+The admin dashboard is at `/co/telemetria` (GitHub-admin gated); read-only public
+analytics are under `/api/v1/analytics/public/*` and `/analytics`.
 
 ## 5. Upgrade
 

@@ -25,6 +25,12 @@
 #   [03] capability round-trip (ONLY if CO_SMOKE_EMAIL/CO_SMOKE_PASSWORD set):
 #        password-login → create ephemeral universe → add entry → GET it back →
 #        delete the universe. Skipped (with a note, still exit 0) if no creds.
+#   [04] telemetry/observability liveness (CO-538): the public analytics surface
+#        (/api/v1/analytics/public/summary) answers — a 5xx is a HARD fail
+#        (telemetry broken). When CO_WEB_DATA + sqlite3 are present, also asserts
+#        the telemetry_events table EXISTS in meta.db and reports its row count
+#        (a live prod should be > 0 and growing — proves events are recorded).
+#        Soft-passes with a note when the surface is non-live or sqlite/DB absent.
 #
 # Exits 0 on full pass; exits 1 on any failed invariant.
 # Output is grep-friendly: each line starts with ✓ or ✗ (matching smoke-prod.sh).
@@ -179,6 +185,50 @@ printf '  data dir: %s\n\n' "$DATA_DIR"
                 _pass "03" "round-trip OK — login → create → add → get → delete (${eph_key})"
             else
                 _fail "03" "delete universe expected HTTP 200/204, got ${del_status}"
+            fi
+        fi
+    fi
+}
+
+# ── [04] Telemetry / observability liveness (CO-538) ─────────────────────────
+# Proves observability survived the cutover. (a) The public analytics/telemetry
+# surface must answer — a 5xx means telemetry is broken (HARD fail); a non-live or
+# remote box that doesn't expose it soft-passes. (b) When the local meta.db is
+# reachable, the telemetry_events table must EXIST and we report its row count —
+# a live prod should be > 0 and keep growing, which is the proof events are being
+# recorded. Absent sqlite3/meta.db → soft-pass with a clear note (exit 0).
+{
+    tmpfile=$(mktemp)
+    tel_status=$(curl -s -o "$tmpfile" -w "%{http_code}" --max-time 10 \
+        "${BASE_URL}/api/v1/analytics/public/summary?days=1" 2>/dev/null) || true
+    tel_status="${tel_status:-000}"
+    if [[ "$tel_status" == "200" ]]; then
+        ev_total=$(python3 -c "import json; print(json.load(open('$tmpfile')).get('events_total','?'))" 2>/dev/null) || true
+        _pass "04" "/api/v1/analytics/public/summary → 200 (telemetry surface live, events_total=${ev_total:-?})"
+    elif [[ "$tel_status" =~ ^5[0-9][0-9]$ ]]; then
+        _fail "04" "/api/v1/analytics/public/summary returned ${tel_status} — telemetry surface is FAILING (5xx)"
+    else
+        _pass "04" "telemetry surface soft-skip — /api/v1/analytics/public/summary got ${tel_status} (not 5xx; not asserting on a non-live/remote box)"
+    fi
+    rm -f "$tmpfile"
+
+    # (b) Local recording proof — telemetry_events table exists + row count.
+    if [[ ! -f "$DATA_DIR/meta.db" ]]; then
+        _pass "04" "telemetry_events row-count skipped — no $DATA_DIR/meta.db on this host (set CO_WEB_DATA to check locally)"
+    elif ! command -v sqlite3 >/dev/null 2>&1; then
+        _pass "04" "telemetry_events row-count skipped — sqlite3 not on PATH"
+    else
+        has_tbl=$(sqlite3 "$DATA_DIR/meta.db" \
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='telemetry_events'" 2>/dev/null) || true
+        if [[ "$has_tbl" != "telemetry_events" ]]; then
+            _fail "04" "telemetry_events table MISSING from $DATA_DIR/meta.db — telemetry is NOT being recorded"
+        else
+            ev_rows=$(sqlite3 "$DATA_DIR/meta.db" "SELECT count(*) FROM telemetry_events" 2>/dev/null) || true
+            ev_rows="${ev_rows:-?}"
+            if [[ "$ev_rows" =~ ^[0-9]+$ ]] && (( ev_rows > 0 )); then
+                _pass "04" "telemetry_events present in meta.db — ${ev_rows} rows recorded (live prod should keep growing)"
+            else
+                _pass "04" "telemetry_events present in meta.db but ${ev_rows} rows (fresh box? expect > 0 on a live prod)"
             fi
         fi
     fi
