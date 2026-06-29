@@ -1,0 +1,28 @@
+{
+  "task_id": "CO-509",
+  "title": "De-embed universes/quilombo from co-web → CO stays tenant-agnostic (DB-driven mappings)",
+  "type": "user-story",
+  "status": "todo",
+  "semver_bump": null,
+  "spec_path": "work/co/CO-509.md",
+  "branch": "feat/CO-509-de-embed-quilombo",
+  "merge_sha": "7252427479e16caa5f6a37f7a07303b161555237",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/326",
+    "number": 326
+  },
+  "started_at": "2026-06-28T00:00:00Z",
+  "merged_at": "2026-06-29T00:59:06Z",
+  "files_changed": 127,
+  "lines_added": 357,
+  "lines_removed": 8645,
+  "labels": [
+    "refactor",
+    "architecture",
+    "generalist",
+    "privacy"
+  ],
+  "changelog_entry": "## CO-509 — De-embed the tenant backend; co is the generalist software\n\nThe open `co` repo no longer ships any tenant-specific backend. CO is the\n**generalist** platform: a tenant's real application lives in its own standalone\nrepo, and its content is served generically through the universe/content APIs —\nnever as bespoke Rust baked into this binary. This restores the\ntemplate = software invariant.\n\n### What was removed\n\n- The entire `co-web/src/universes/<tenant>/` module (routes, storage, models,\n  permissions, telemetry, processos) and its `lib.rs` re-exports.\n- The tenant API mount (`/api/v1/<tenant>`), its bespoke telemetry / CSRF /\n  canonical-host middleware, and the `/api/v1/processos` mount in `server/router.rs`.\n- The cross-account bridge layer (the tenant `storage/*_bridge.rs` and the\n  `find_*` / `ensure_*` / `mirror_*` / `link_*` lookups in `storage/auth.rs`),\n  plus every caller in the auth, recovery, OAuth/OIDC and onboarding handlers.\n  The password-recovery flow is now a clean, generic CO flow with no bridge calls.\n- Tenant seeding (`seed_*_universe`, content import, public stats endpoint +\n  model), the boot-time backfill/integrity passes, the one-shot migration\n  binaries, and the hardcoded tenant entry in the deployment-snapshot registry.\n- The hardcoded tenant config (`*_legacy_login`, vault-dir fields), the\n  hardcoded tenant theme preset, and the tenant-specific notification templates.\n\n### Made generalist (not removed)\n\n- Notification templates are now fully env-driven (`CO_TPL_<EVENT>_<SLOT>`) with\n  no tenant-specific defaults compiled into the binary.\n- The webhook event-matching engine, JWT `usuario`/`papel` claims, and the\n  universe member-metadata API are kept but documented as tenant-agnostic.\n- The canonical-host / `return_to` safelist no longer special-cases any tenant\n  domain; only `*.artelonga.com.br` (and localhost) are allowed.\n\n### Migrations\n\nThe chain stays valid and self-contained. The historical migration that created\nthe tenant tables is now a no-op-on-fresh that only **reserves** its version\nnumbers, and later `ALTER`s of those tables are guarded by a new `table_exists`\nhelper so they apply only on legacy databases and never panic on a fresh one.\n`fresh_db_reaches_latest_version` passes.\n\n### Why\n\nTenant code in the generalist binary couples every release to one customer and\ncontradicts the template = software invariant. With it gone, `co` compiles and\n`cargo test --workspace` is green with zero tenant backend code; onboarding a\nnew content surface needs no deploy of this repo.",
+  "summary": "GIVEN `co-web/src/universes/quilombo/` embeds a **private tenant's** backend directly into the open platform — `quilombo_routes` / `storage` / `telemetria` / `permissoes`, `lib.rs` re-exports, `migrat",
+  "co_auto_version": "0.1.0"
+}
