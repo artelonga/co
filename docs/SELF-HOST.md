@@ -148,6 +148,44 @@ header of [`cloudflared-config.example.yml`](../scripts/selfhost/cloudflared-con
 > stays clean. This is the recommended default for the tunnel path (same posture as the
 > Caddy path below). Only use `0.0.0.0` if you *also* want direct LAN access.
 
+### Cloudflare cache — keep the site up when the M4 is down (CO-540)
+
+Self-host with no UPS means the origin can vanish (sleep / power-out). co-web sends
+`stale-if-error=604800` on public reads (CO-540), so the CDN serves the **last-good
+cached version for up to 7 days** when the origin is unreachable. Turn it on in the
+Cloudflare dashboard (the `co.artelonga.com.br` zone must be proxied — orange cloud):
+
+1. **Caching → Configuration:** *Always Online* **ON**, *Tiered Cache* **ON**.
+2. **Caching → Cache Rules — add two rules, in this order** (the bypass rule must be
+   first; copy the expressions verbatim into "Edit expression"):
+
+   **Rule 1 — "Bypass dynamic & authenticated"** → action *Bypass cache*:
+   ```
+   (starts_with(http.request.uri.path, "/api/")) or
+   (starts_with(http.request.uri.path, "/auth/")) or
+   (starts_with(http.request.uri.path, "/gestao/")) or
+   (starts_with(http.request.uri.path, "/admin")) or
+   (http.request.uri.path eq "/co/telemetria") or
+   (http.request.uri.path eq "/analytics") or
+   (http.cookie contains "session=")
+   ```
+
+   **Rule 2 — "Cache public content"** → action *Eligible for cache*, Edge TTL =
+   *Use cache-control header if present* (honors co-web's `s-maxage`/`stale-if-error`):
+   ```
+   (starts_with(http.request.uri.path, "/co/")) or
+   (starts_with(http.request.uri.path, "/assets/")) or
+   (starts_with(http.request.uri.path, "/static/"))
+   ```
+
+3. **(Optional) instant updates:** set `CO_CDN_PURGE_URL` in the M4 env — co-web emits a
+   `Cache-Tag` per page and purges the exact path on write, so edits appear immediately
+   instead of after the 60s TTL.
+
+**Tradeoff:** only the **public read** site survives an origin outage from cache; login,
+the admin/gestão dashboards, the API, and writes are down until the M4 is back. Full
+failover is the deferred **CO-539** (cloud standby).
+
 ### Caddy (only with a public IP)
 
 If you can forward inbound 80/443, Caddy gives auto Let's Encrypt TLS without

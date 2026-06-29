@@ -23,8 +23,13 @@ use crate::platform::error::AppError;
 use crate::server::AppState;
 
 /// CDN cache directive for public-static reads: cache 60s at the edge, then
-/// serve stale for up to 24h while revalidating in the background.
-pub const PUBLIC_STATIC_CACHE_CONTROL: &str = "public, s-maxage=60, stale-while-revalidate=86400";
+/// serve stale for up to 24h while revalidating in the background, AND serve the
+/// last-good version for up to 7d if the origin is unreachable (`stale-if-error`).
+/// The latter is the self-host availability backstop (CO-540): when the M4 origin
+/// is asleep / power-out / offline, the CDN keeps the public site up from cache
+/// instead of erroring. Pairs with Cloudflare "Always Online".
+pub const PUBLIC_STATIC_CACHE_CONTROL: &str =
+    "public, s-maxage=60, stale-while-revalidate=86400, stale-if-error=604800";
 
 /// `GET /co/{slug}/{*path}` — render a public-static entry to cacheable HTML.
 pub async fn serve_static_html(
@@ -266,6 +271,8 @@ mod tests {
     fn cache_control_is_cdn_tuned() {
         assert!(PUBLIC_STATIC_CACHE_CONTROL.contains("s-maxage=60"));
         assert!(PUBLIC_STATIC_CACHE_CONTROL.contains("stale-while-revalidate=86400"));
+        // CO-540: serve last-good from the edge when the (self-host) origin is down.
+        assert!(PUBLIC_STATIC_CACHE_CONTROL.contains("stale-if-error=604800"));
     }
 
     #[test]
