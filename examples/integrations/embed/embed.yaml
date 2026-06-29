@@ -1,0 +1,29 @@
+# embed — DETERMINISTIC subprocess tool that produces vectors (CO-503 → CO-517).
+#
+# Embedding is "just a tool". CO's SubprocessInvoker writes the JSON args to the
+# script's stdin and parses its stdout as JSON; the resulting vectors feed the
+# CO-517 Vectorizer trait + sqlite-vec store.
+#
+# `status: inactive` = documentation, not a live dependency. Flip to `active` to
+# register it. Discovery requires CO_ENABLE_EXTERNAL_TOOLS=1 + a trusted dir.
+name: embed
+description: >-
+  Embed one or more texts into vectors. Uses a local Ollama embeddings model
+  (nomic-embed-text) when reachable, otherwise a deterministic statistical
+  fallback so it always runs offline.
+tool_type: deterministic
+command: python3 examples/integrations/embed/embed.py
+category: vectors
+status: inactive
+dependencies:
+  - ollama          # optional: nomic-embed-text @ http://localhost:11434
+input_schema:
+  type: object
+  properties:
+    texts:
+      type: array
+      items:
+        type: string
+      description: The texts to embed (one vector per input text).
+  required:
+    - texts

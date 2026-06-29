@@ -1,0 +1,38 @@
+# r-stats — DETERMINISTIC subprocess tool (CO-503 canonical tool contract).
+#
+# Any R script becomes a CO tool through this manifest alone — no binary
+# recompile. The subprocess invoker writes the JSON args to the script's stdin
+# and parses its stdout as JSON (see co/src/canon_tool.rs::SubprocessInvoker).
+#
+# `status: inactive` keeps this as documentation rather than a live dependency;
+# flip to `active` (and have Rscript installed) to register it. Discovery only
+# happens when CO_ENABLE_EXTERNAL_TOOLS=1 and the manifest sits in a trusted
+# tools dir.
+name: r-stats
+description: >-
+  Compute summary statistics (mean, median, sd, quantiles) over a numeric vector
+  using base R. Accepts inline values or a path to a single-column CSV.
+tool_type: deterministic
+command: Rscript examples/integrations/r-stats/summary.R
+category: analysis
+status: inactive
+# R is an external runtime, declared here so reviewers see the dependency without
+# needing it installed to read the sample.
+dependencies:
+  - R
+  - Rscript
+input_schema:
+  type: object
+  properties:
+    values:
+      type: array
+      items:
+        type: number
+      description: Inline numeric vector to summarize.
+    csv_path:
+      type: string
+      description: >-
+        Path to a CSV whose first column holds the numbers (used when `values`
+        is absent). Header row is auto-detected and skipped.
+  # Neither is individually required; the script errors if both are missing.
+  # JSON Schema can't express "one of" cleanly here, so the script enforces it.

@@ -1,0 +1,45 @@
+# voicebox — PREDICTIVE external HTTP voice tool (CO-503 / CO-522 / CO-531).
+#
+# A self-hosted STT/TTS service (jamiepine/voicebox) reachable over HTTP becomes a
+# CO tool with no recompile. CO's HTTP invoker (injected from co-web, which has
+# reqwest) POSTs the JSON args to `url` and reads JSON back — the same adapter shape
+# as tools.d/yt-summarizer.example.yaml and the rag-service sample.
+#
+# LOCAL-FIRST: the real voicebox backend is self-hosted/configured behind this URL;
+# audio never leaves the instance and no cloud STT/TTS is called (no API bill) —
+# aligns with the CO-497 data-residency invariant.
+#
+# `status: inactive` = documentation, not a live dependency. Flip to `active` once
+# the service is running. Discovery requires CO_ENABLE_EXTERNAL_TOOLS=1 and a
+# trusted tools dir.
+name: voicebox
+description: >-
+  Local-first voice for the agent: transcribe speech to text (STT) or synthesize
+  text to speech (TTS) via a self-hosted voicebox backend, with no cloud call and
+  no API bill. The agent calls transcribe/synthesize like any other tool.
+tool_type: predictive
+url: http://localhost:9200/voice
+category: voice
+status: inactive
+dependencies:
+  - voicebox
+input_schema:
+  type: object
+  properties:
+    action:
+      type: string
+      enum:
+        - transcribe
+        - synthesize
+      description: transcribe = audio→text (STT); synthesize = text→audio (TTS).
+    audio_b64:
+      type: string
+      description: Base64-encoded audio to transcribe (action=transcribe).
+    text:
+      type: string
+      description: The text to synthesize into speech (action=synthesize).
+    voice:
+      type: string
+      description: Optional voice/preset name for synthesis (action=synthesize).
+  required:
+    - action

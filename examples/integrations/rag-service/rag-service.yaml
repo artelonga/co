@@ -1,0 +1,31 @@
+# rag-service — PREDICTIVE external HTTP tool (CO-503 / CO-525).
+#
+# An out-of-process RAG service (LlamaIndex / production-agentic-rag) reachable
+# over HTTP becomes a CO tool with no recompile. CO's HTTP invoker (injected from
+# co-web, which has reqwest) POSTs the JSON args to `url` and reads JSON back —
+# the same adapter shape as tools.d/yt-summarizer.example.yaml.
+#
+# `status: inactive` = documentation, not a live dependency. Flip to `active`
+# once the service is running. Discovery requires CO_ENABLE_EXTERNAL_TOOLS=1 and
+# a trusted tools dir.
+name: rag-service
+description: >-
+  Answer a question over an indexed corpus via retrieval-augmented generation,
+  returning a synthesized answer plus the source passages it used.
+tool_type: predictive
+url: http://localhost:9100/query
+category: knowledge
+status: inactive
+dependencies:
+  - llama-index
+input_schema:
+  type: object
+  properties:
+    query:
+      type: string
+      description: The natural-language question to answer over the corpus.
+    k:
+      type: integer
+      description: How many source passages to retrieve (default 3).
+  required:
+    - query
