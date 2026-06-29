@@ -128,7 +128,7 @@ for you:
 
 | Goal | How | Bind |
 |------|-----|------|
-| Public site (home/CGNAT) | `run.sh` (default) + **Cloudflare Tunnel** | `0.0.0.0`, tunnel does TLS |
+| Public site (home/CGNAT) | `run.sh --localhost` + **Cloudflare Tunnel** | `127.0.0.1` (tunnel fronts it, same-box) |
 | Public site (public IP) | `run.sh` + **Caddy** reverse proxy | `127.0.0.1` (Caddy fronts it) |
 | LAN only | `run.sh` (default) reachable on the LAN | `0.0.0.0` |
 | Loopback only | `run.sh --localhost` | `127.0.0.1` |
@@ -140,6 +140,13 @@ connection to Cloudflare's edge, which proxies public HTTPS back down to
 `localhost:8742` — public reach **and** managed TLS with **zero inbound ports
 open**. Full setup (login → create → route-dns → service install) is in the
 header of [`cloudflared-config.example.yml`](../scripts/selfhost/cloudflared-config.example.yml).
+
+> **Run co-web on loopback (`run.sh --localhost`).** `cloudflared` runs on the same
+> box and connects to `localhost:8742`, so co-web does **not** need to bind `0.0.0.0`.
+> Binding `127.0.0.1` means co-web is **never reachable on the LAN at all** — the tunnel
+> is the only path in — so there's nothing to firewall/allowlist and the exposure-scan
+> stays clean. This is the recommended default for the tunnel path (same posture as the
+> Caddy path below). Only use `0.0.0.0` if you *also* want direct LAN access.
 
 ### Caddy (only with a public IP)
 
