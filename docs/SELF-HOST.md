@@ -19,6 +19,14 @@ The kit lives in [`scripts/selfhost/`](../scripts/selfhost/):
 | `litestream.yml` | Continuous off-box backup of `meta.db` (+ companion per-universe snapshot). |
 | `verify-restore.sh` | Prove the backup actually restores (read-only). |
 
+Three cutover/ops helpers live alongside, in [`scripts/`](../scripts/):
+
+| Script | Purpose |
+|--------|---------|
+| `smoke-selfhost.sh` | Content-agnostic capability smoke — **the self-host replacement for `smoke-prod.sh`** (CO-536). Health + version + clean serve-allowlist + an opt-in auth/CRUD round-trip; no pinned seed counts, tenant names, or Fly URLs. |
+| `disk-gate-selfhost.sh` | Local `df` disk pre-flight (CO-537) — blocks an upgrade at >85% full (mirrors CO-446), warns at >75%. No flyctl. |
+| `migrate-fly-to-m4.sh` | One-time Fly → M4 data migration (dry-run by default, `--apply` to execute). |
+
 ---
 
 ## 1. Prerequisites
@@ -69,7 +77,17 @@ cargo run -p co-web --bin audit_serve -- ~/.co/data
 # 6. Health check
 curl -s http://localhost:8742/api/health
 #    → {"status":"ok","version":"...","env":"production"}
+
+# 7. Capability smoke (content-agnostic — replaces smoke-prod.sh for self-host)
+bash scripts/smoke-selfhost.sh
+#    → ✓ health+version, ✓ clean serve-allowlist. Add an auth/CRUD round-trip with:
+#    CO_SMOKE_EMAIL=you@example.com CO_SMOKE_PASSWORD=… bash scripts/smoke-selfhost.sh
 ```
+
+> **`smoke-selfhost.sh` is the self-host replacement for `smoke-prod.sh`.** The
+> latter pins production seed counts, tenant/universe names, and Fly URLs; a
+> tenant-free self-host box has none of those, so use `smoke-selfhost.sh` (CO-536)
+> — it proves the engine's *capabilities*, not that any particular content exists.
 
 Data lands in `$CO_WEB_DATA` (default `~/.co/data`) with the CO-77 layout:
 
@@ -189,18 +207,17 @@ scripts/selfhost/verify-restore.sh
 git -C ~/projects/co pull
 
 # 3. CO-446 disk pre-flight — a migration that can't write schema_version on a
-#    near-full disk crash-loops the server. Make sure $CO_WEB_DATA's volume has
-#    headroom (rule of thumb: keep it < 85% full) before upgrading.
-df -h ~/.co/data
+#    near-full disk crash-loops the server. The CO-537 gate blocks at >85% full.
+scripts/disk-gate-selfhost.sh             # exit 1 if too full (extend/free first)
 
 # 4. Rebuild + restart (migrations run automatically at boot)
 launchctl kickstart -k gui/$(id -u)/com.artelonga.co      # plist runs run.sh
 #    or, without launchd:
 scripts/selfhost/run.sh
 
-# 5. Re-check health + leak surface
-curl -s http://localhost:8742/api/health
-cargo run -p co-web --bin audit_serve -- ~/.co/data
+# 5. Re-check health + leak surface + capabilities
+scripts/smoke-selfhost.sh                 # health+version, clean serve-allowlist
+cargo run -p co-web --bin audit_serve -- ~/.co/data   # (also run inside the smoke)
 ```
 
 Migrations are applied automatically on boot (source of truth:
@@ -216,6 +233,35 @@ self-hosted box, see **`infra/SELF-HOST-SECURITY.md`** (the security kit:
 `pf` firewall rules, kill-switch, exposure-scan e2e guard — born from the
 `.git`-over-`:8000` postmortem). co-web binding `0.0.0.0` is for reachability,
 not a security boundary — the firewall and tunnel/proxy in front of it are.
+
+---
+
+## 7. Migrating from Fly (one-time cutover)
+
+Moving an existing managed Fly deploy onto a self-host box (e.g. making the Mac M4
+the sole prod) is a one-time data move, then a DNS flip. The full 7-step runbook —
+build+boot loopback → Cloudflare tunnel on a TEST host → migrate → harden → cut DNS
+→ soak → retire Fly — is **`work/co/CO-538.md`**.
+
+The data step is scripted:
+
+```bash
+# Dry-run first (prints the exact plan, changes nothing):
+scripts/migrate-fly-to-m4.sh --app co-artelonga
+
+# Then execute during a quiet window (ideally with the Fly app quiesced):
+scripts/migrate-fly-to-m4.sh --app co-artelonga --apply
+```
+
+It tars `/data` (meta.db + `universes/*.db`) on the Fly app over `flyctl ssh`,
+downloads it, backs up any existing local target (with a confirm prompt), restores
+into `~/.co/data`, then proves the result with `smoke-selfhost.sh` +
+`verify-restore.sh`. The remote side is read-only toward the live DB.
+
+> The M4 is a single box. The accepted near-term resilience profile is anti-sleep
+> (`sudo pmset -c disablesleep 1`), `sudo pmset -a autorestart 1`, a UPS, launchd
+> `KeepAlive`, and verified off-box backups. A cloud failover/standby is deferred
+> to **`work/co/CO-539.md`**.
 
 ---
 
