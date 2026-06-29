@@ -1,0 +1,28 @@
+{
+  "task_id": "CO-538",
+  "title": "Fly → M4 prod cutover — self-host the Mac M4 as the sole prod (Cloudflare Tunnel), retire Fly",
+  "type": "user-story",
+  "status": "todo",
+  "semver_bump": null,
+  "spec_path": "work/co/CO-538.md",
+  "branch": "feat/CO-538-m4-cutover",
+  "merge_sha": "9f0e0b40095f90b0c7cc319cd0bd4c00926e0df0",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/328",
+    "number": 328
+  },
+  "started_at": "2026-06-28T00:00:00Z",
+  "merged_at": "2026-06-29T02:03:45Z",
+  "files_changed": 13,
+  "lines_added": 936,
+  "lines_removed": 14,
+  "labels": [
+    "chore",
+    "self-host",
+    "ops",
+    "deploy"
+  ],
+  "changelog_entry": "## CO-538 — Fly → M4 prod-cutover tooling + runbook\n\nTooling and a 7-step runbook to make the Mac M4 the sole self-hosted prod (reached\nvia Cloudflare Tunnel) and retire the managed Fly app.\n\n- **`scripts/migrate-fly-to-m4.sh`** — one-time data migration. Dry-run by default\n  (prints the exact plan, touches nothing); `--apply` tars `/data` (meta.db +\n  per-universe DBs) on the Fly app over `flyctl ssh`, downloads it, backs up any\n  existing local target and asks for confirmation, restores into `~/.co/data`, then\n  proves it with `smoke-selfhost.sh` + `selfhost/verify-restore.sh`. The remote side\n  is read-only toward the live DB.\n- **Runbook** `work/co/CO-538.md`: merge de-embed → build+boot M4 loopback →\n  Cloudflare tunnel on a TEST host → migrate data → harden (firewall/secrets/Ollama/\n  backups/anti-sleep) → cut DNS → soak → retire Fly. Includes the single-box\n  availability profile (`pmset disablesleep`/`autorestart`, UPS, launchd KeepAlive).\n- Cloud failover/standby for the single box is captured as deferred follow-up\n  (CO-539); the near-term profile is anti-sleep + UPS + verified off-box backups.\n- `docs/SELF-HOST.md` now references `smoke-selfhost.sh`, `disk-gate-selfhost.sh`,\n  and `migrate-fly-to-m4.sh` (and that smoke-selfhost replaces smoke-prod for the M4).",
+  "summary": "GIVEN Fly is being deprecated and the Mac M4 becomes the SOLE prod (self-host), reached over a Cloudflare Tunnel, and co is now tenant-free (de-embed merged) so prod is content-agnostic — the same `ta",
+  "co_auto_version": "0.1.0"
+}
