@@ -19,6 +19,14 @@ The kit lives in [`scripts/selfhost/`](../scripts/selfhost/):
 | `litestream.yml` | Continuous off-box backup of `meta.db` (+ companion per-universe snapshot). |
 | `verify-restore.sh` | Prove the backup actually restores (read-only). |
 
+Three cutover/ops helpers live alongside, in [`scripts/`](../scripts/):
+
+| Script | Purpose |
+|--------|---------|
+| `smoke-selfhost.sh` | Content-agnostic capability smoke — **the self-host replacement for `smoke-prod.sh`** (CO-536). Health + version + clean serve-allowlist + an opt-in auth/CRUD round-trip + a telemetry-liveness check (CO-538); no pinned seed counts, tenant names, or Fly URLs. |
+| `disk-gate-selfhost.sh` | Local `df` disk pre-flight (CO-537) — blocks an upgrade at >85% full (mirrors CO-446), warns at >75%. No flyctl. |
+| `migrate-fly-to-m4.sh` | One-time Fly → M4 data migration (dry-run by default, `--apply` to execute). |
+
 ---
 
 ## 1. Prerequisites
@@ -69,7 +77,17 @@ cargo run -p co-web --bin audit_serve -- ~/.co/data
 # 6. Health check
 curl -s http://localhost:8742/api/health
 #    → {"status":"ok","version":"...","env":"production"}
+
+# 7. Capability smoke (content-agnostic — replaces smoke-prod.sh for self-host)
+bash scripts/smoke-selfhost.sh
+#    → ✓ health+version, ✓ clean serve-allowlist. Add an auth/CRUD round-trip with:
+#    CO_SMOKE_EMAIL=you@example.com CO_SMOKE_PASSWORD=… bash scripts/smoke-selfhost.sh
 ```
+
+> **`smoke-selfhost.sh` is the self-host replacement for `smoke-prod.sh`.** The
+> latter pins production seed counts, tenant/universe names, and Fly URLs; a
+> tenant-free self-host box has none of those, so use `smoke-selfhost.sh` (CO-536)
+> — it proves the engine's *capabilities*, not that any particular content exists.
 
 Data lands in `$CO_WEB_DATA` (default `~/.co/data`) with the CO-77 layout:
 
@@ -110,7 +128,7 @@ for you:
 
 | Goal | How | Bind |
 |------|-----|------|
-| Public site (home/CGNAT) | `run.sh` (default) + **Cloudflare Tunnel** | `0.0.0.0`, tunnel does TLS |
+| Public site (home/CGNAT) | `run.sh --localhost` + **Cloudflare Tunnel** | `127.0.0.1` (tunnel fronts it, same-box) |
 | Public site (public IP) | `run.sh` + **Caddy** reverse proxy | `127.0.0.1` (Caddy fronts it) |
 | LAN only | `run.sh` (default) reachable on the LAN | `0.0.0.0` |
 | Loopback only | `run.sh --localhost` | `127.0.0.1` |
@@ -122,6 +140,13 @@ connection to Cloudflare's edge, which proxies public HTTPS back down to
 `localhost:8742` — public reach **and** managed TLS with **zero inbound ports
 open**. Full setup (login → create → route-dns → service install) is in the
 header of [`cloudflared-config.example.yml`](../scripts/selfhost/cloudflared-config.example.yml).
+
+> **Run co-web on loopback (`run.sh --localhost`).** `cloudflared` runs on the same
+> box and connects to `localhost:8742`, so co-web does **not** need to bind `0.0.0.0`.
+> Binding `127.0.0.1` means co-web is **never reachable on the LAN at all** — the tunnel
+> is the only path in — so there's nothing to firewall/allowlist and the exposure-scan
+> stays clean. This is the recommended default for the tunnel path (same posture as the
+> Caddy path below). Only use `0.0.0.0` if you *also* want direct LAN access.
 
 ### Caddy (only with a public IP)
 
@@ -179,6 +204,38 @@ scripts/selfhost/run.sh
 
 ---
 
+## 4b. Telemetry on self-host
+
+Telemetry (CO-46) runs the same on self-host as on Fly — `telemetry_middleware`
+records privacy-respecting pageviews/events with **no PII** (daily-salted IP hash,
+no raw IP/email/content). Where it lives and how to keep it whole:
+
+- **Storage = `meta.db` + a local cold archive.** Hot events live in the
+  `telemetry_events` table inside `$CO_WEB_DATA/meta.db` (so Litestream already
+  backs them up). When archival is enabled, cold months move to Parquet under
+  `$CO_WEB_DATA/telemetry-archive/` (CO-449) — keep that directory in your
+  companion `universes/`-style snapshot so cold telemetry is backed up too.
+- **Turn on cold-tier archival** so `telemetry_events` doesn't bloat `meta.db`
+  (and push the disk back over the CO-537 gate):
+  `CO_TELEMETRY_ARCHIVE_ENABLED=true`, `CO_TELEMETRY_HOT_DAYS=90` (default),
+  optional `CO_TELEMETRY_ARCHIVE_INTERVAL_SECS=86400`.
+- **GeoLite2 is required for country/city enrichment.** `geo.rs` reads a MaxMind
+  GeoLite2 DB from `GEOIP_DB_PATH` (default `/data/GeoLite2-City.mmdb`); **absent →
+  geo is silently disabled** (NULL country/city). Download `GeoLite2-City.mmdb`
+  (free MaxMind account) and point `GEOIP_DB_PATH` at it
+  (e.g. `~/.co/data/GeoLite2-City.mmdb`).
+- **Optional external traces/metrics:** `CO_TELEMETRY_OTLP_ENDPOINT` (gRPC),
+  `CO_TELEMETRY_SERVICE_NAME` (default `co-web`), `CO_TELEMETRY_SAMPLING_RATIO`
+  (default `1.0`).
+- **`smoke-selfhost.sh` now checks telemetry liveness** (`[04]`): the public
+  analytics surface (`/api/v1/analytics/public/summary`) must answer (a 5xx is a
+  hard fail), and — when `sqlite3` + `$CO_WEB_DATA/meta.db` are present — it
+  asserts the `telemetry_events` table exists and reports its row count (a live
+  prod should be > 0 and growing).
+
+The admin dashboard is at `/co/telemetria` (GitHub-admin gated); read-only public
+analytics are under `/api/v1/analytics/public/*` and `/analytics`.
+
 ## 5. Upgrade
 
 ```bash
@@ -189,18 +246,17 @@ scripts/selfhost/verify-restore.sh
 git -C ~/projects/co pull
 
 # 3. CO-446 disk pre-flight — a migration that can't write schema_version on a
-#    near-full disk crash-loops the server. Make sure $CO_WEB_DATA's volume has
-#    headroom (rule of thumb: keep it < 85% full) before upgrading.
-df -h ~/.co/data
+#    near-full disk crash-loops the server. The CO-537 gate blocks at >85% full.
+scripts/disk-gate-selfhost.sh             # exit 1 if too full (extend/free first)
 
 # 4. Rebuild + restart (migrations run automatically at boot)
 launchctl kickstart -k gui/$(id -u)/com.artelonga.co      # plist runs run.sh
 #    or, without launchd:
 scripts/selfhost/run.sh
 
-# 5. Re-check health + leak surface
-curl -s http://localhost:8742/api/health
-cargo run -p co-web --bin audit_serve -- ~/.co/data
+# 5. Re-check health + leak surface + capabilities
+scripts/smoke-selfhost.sh                 # health+version, clean serve-allowlist
+cargo run -p co-web --bin audit_serve -- ~/.co/data   # (also run inside the smoke)
 ```
 
 Migrations are applied automatically on boot (source of truth:
@@ -216,6 +272,35 @@ self-hosted box, see **`infra/SELF-HOST-SECURITY.md`** (the security kit:
 `pf` firewall rules, kill-switch, exposure-scan e2e guard — born from the
 `.git`-over-`:8000` postmortem). co-web binding `0.0.0.0` is for reachability,
 not a security boundary — the firewall and tunnel/proxy in front of it are.
+
+---
+
+## 7. Migrating from Fly (one-time cutover)
+
+Moving an existing managed Fly deploy onto a self-host box (e.g. making the Mac M4
+the sole prod) is a one-time data move, then a DNS flip. The full 7-step runbook —
+build+boot loopback → Cloudflare tunnel on a TEST host → migrate → harden → cut DNS
+→ soak → retire Fly — is **`work/co/CO-538.md`**.
+
+The data step is scripted:
+
+```bash
+# Dry-run first (prints the exact plan, changes nothing):
+scripts/migrate-fly-to-m4.sh --app co-artelonga
+
+# Then execute during a quiet window (ideally with the Fly app quiesced):
+scripts/migrate-fly-to-m4.sh --app co-artelonga --apply
+```
+
+It tars `/data` (meta.db + `universes/*.db`) on the Fly app over `flyctl ssh`,
+downloads it, backs up any existing local target (with a confirm prompt), restores
+into `~/.co/data`, then proves the result with `smoke-selfhost.sh` +
+`verify-restore.sh`. The remote side is read-only toward the live DB.
+
+> The M4 is a single box. The accepted near-term resilience profile is anti-sleep
+> (`sudo pmset -c disablesleep 1`), `sudo pmset -a autorestart 1`, a UPS, launchd
+> `KeepAlive`, and verified off-box backups. A cloud failover/standby is deferred
+> to **`work/co/CO-539.md`**.
 
 ---
 

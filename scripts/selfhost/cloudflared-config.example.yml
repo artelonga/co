@@ -9,6 +9,13 @@
 # PREREQUISITE: the artelonga.com.br domain's DNS must be managed by Cloudflare
 # (move the nameservers to Cloudflare at your registrar first).
 #
+# RECOMMENDED: run co-web on LOOPBACK — `scripts/selfhost/run.sh --localhost`
+# (binds 127.0.0.1). cloudflared runs on the SAME box and connects to
+# localhost:8742, so co-web never needs 0.0.0.0. Loopback means co-web is not
+# reachable on the LAN at all — the tunnel is the only way in — so there's nothing
+# to firewall/allowlist and the exposure-scan stays clean. The ingress below already
+# targets localhost; only use 0.0.0.0 if you ALSO want direct LAN access.
+#
 # SETUP
 # -----
 #   brew install cloudflared
