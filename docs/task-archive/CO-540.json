@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-540",
+  "title": "stale-if-error on public reads — CDN serves last-good when the self-host origin is down",
+  "type": "user-story",
+  "status": "todo",
+  "semver_bump": null,
+  "spec_path": "work/co/CO-540.md",
+  "branch": "feat/CO-540-stale-if-error",
+  "merge_sha": "8f39d367b7bdd2d3b3e57709ef11c16837ed3b04",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/329",
+    "number": 329
+  },
+  "started_at": "2026-06-28T00:00:00Z",
+  "merged_at": "2026-06-29T02:26:05Z",
+  "files_changed": 4,
+  "lines_added": 99,
+  "lines_removed": 2,
+  "labels": [
+    "feat",
+    "self-host",
+    "performance"
+  ],
+  "changelog_entry": "## CO-540 — stale-if-error on public reads (self-host availability backstop)\n\nPublic-static reads now carry `stale-if-error=604800` (in addition to the existing\n`s-maxage=60, stale-while-revalidate=86400`), so a CDN edge keeps the public site up\nby serving the last-good cached version for up to 7 days when the self-host origin is\nunreachable (asleep / power-out / offline) — \"return latest if unavailable\".\n\n### Why\nThe M4 becomes sole prod with the UPS deferred; the edge cache is the availability\nbackstop. Pairs with Cloudflare \"Always Online\". The dynamic/auth/API surface stays\nuncacheable and is unavailable while the origin is down (accepted tradeoff; full\nfailover is the deferred CO-539).",
+  "summary": "GIVEN the M4 becomes sole prod with NO UPS (deferred), so the origin can go away (sleep / power-out / offline), and co-web already CDN-tunes public-static reads (`s-maxage=60, stale-while-revalidate=8",
+  "co_auto_version": "0.1.0"
+}
