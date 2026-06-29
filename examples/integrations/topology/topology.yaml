@@ -1,0 +1,36 @@
+# topology — comunicacao meaning-topology as a DETERMINISTIC CO tool (CO-503 → CO-517).
+#
+# comunicacao's cross-language meaning-topology becomes "just a tool". The
+# statistical / co-occurrence path runs OFFLINE (PPMI over a shipped artifact);
+# the NEURAL overlay (nomic embeddings via Ollama) is the predictive variant —
+# both behind the CO-517 Vectorizer, swap is a flag. CO's SubprocessInvoker
+# writes the JSON args to the script's stdin and parses its stdout as JSON.
+#
+# `status: inactive` = documentation, not a live dependency. Flip to `active` to
+# register it. Discovery requires CO_ENABLE_EXTERNAL_TOOLS=1 + a trusted dir.
+name: topology
+description: >-
+  Cross-language meaning-topology lookup. Given a word, return its nearest
+  concept-neighbors (co-occurrence / PPMI) and its translations across languages
+  (pt/es/yoruba/guarani). Ships a tiny embedded sample lexicon so it runs offline;
+  in production it reads a portable topologia.json artifact.
+tool_type: deterministic
+command: python3 examples/integrations/topology/topology.py
+category: language
+status: inactive
+dependencies:
+  - comunicacao-lexicon   # the topologia.json artifact (this sample embeds a tiny one)
+input_schema:
+  type: object
+  properties:
+    word:
+      type: string
+      description: The term to look up in the meaning-topology.
+    lang:
+      type: string
+      description: Language of the input word (pt|es|yo|gn). Optional; inferred if omitted.
+    k:
+      type: integer
+      description: How many concept-neighbors to return (default 8).
+  required:
+    - word

@@ -1,0 +1,863 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CO Architecture Refactor — visual proposal</title>
+<style>
+  :root{
+    --bg:#0b0e0c;
+    --bg2:#11150f;
+    --panel:#151a13;
+    --panel2:#1b2118;
+    --line:#2a3326;
+    --ink:#e8efe2;
+    --muted:#9aa893;
+    --faint:#6f7d68;
+    --leaf:#3a7d44;
+    --leaf2:#52a35f;
+    --leaf-dim:#244c2a;
+    --gold:#d4a017;
+    --gold2:#f0c34a;
+    --gold-dim:#5a4710;
+    --red:#c0573f;
+    --blue:#5a8fb0;
+    --radius:14px;
+    --shadow:0 6px 24px rgba(0,0,0,.45);
+    font-synthesis:none;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:
+      radial-gradient(1200px 600px at 80% -10%, rgba(58,125,68,.10), transparent 60%),
+      radial-gradient(900px 500px at 0% 0%, rgba(212,160,23,.06), transparent 55%),
+      var(--bg);
+    color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    line-height:1.5;
+    -webkit-font-smoothing:antialiased;
+    min-height:100vh;
+  }
+  code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  a{color:var(--leaf2)}
+
+  header.top{
+    position:sticky;top:0;z-index:50;
+    backdrop-filter:blur(10px);
+    background:rgba(11,14,12,.82);
+    border-bottom:1px solid var(--line);
+  }
+  .top-inner{
+    max-width:1280px;margin:0 auto;padding:14px 22px;
+    display:flex;align-items:center;gap:18px;flex-wrap:wrap;
+  }
+  .brand{display:flex;align-items:center;gap:12px;margin-right:6px}
+  .logo{
+    width:34px;height:34px;border-radius:9px;flex:0 0 auto;
+    background:linear-gradient(135deg,var(--leaf),var(--leaf-dim));
+    display:flex;align-items:center;justify-content:center;
+    font-weight:800;color:#eafbe9;box-shadow:inset 0 0 0 1px rgba(255,255,255,.08);
+    position:relative;
+  }
+  .logo::after{content:"";position:absolute;right:-3px;top:-3px;width:11px;height:11px;border-radius:50%;background:var(--gold);box-shadow:0 0 0 2px var(--bg)}
+  .brand h1{font-size:15px;margin:0;letter-spacing:.2px;font-weight:700}
+  .brand .sub{font-size:11.5px;color:var(--muted);margin-top:1px}
+  nav.views{display:flex;gap:6px;flex-wrap:wrap;margin-left:auto}
+  nav.views button{
+    background:transparent;border:1px solid transparent;color:var(--muted);
+    padding:8px 13px;border-radius:10px;cursor:pointer;font-size:13px;font-weight:600;
+    transition:.15s;display:flex;align-items:center;gap:8px;
+  }
+  nav.views button .n{font-size:10.5px;color:var(--faint);font-weight:700}
+  nav.views button:hover{color:var(--ink);background:var(--panel)}
+  nav.views button.active{color:#eafbe9;background:linear-gradient(180deg,rgba(58,125,68,.30),rgba(58,125,68,.12));border-color:var(--leaf-dim)}
+  nav.views button.active .n{color:var(--gold2)}
+
+  main{max-width:1280px;margin:0 auto;padding:30px 22px 90px}
+  .view{display:none;animation:fade .35s ease}
+  .view.active{display:block}
+  @keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+  .view-head{margin-bottom:22px}
+  .view-head .kicker{color:var(--gold);font-size:12px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase}
+  .view-head h2{margin:5px 0 6px;font-size:27px;letter-spacing:-.3px}
+  .view-head p{margin:0;color:var(--muted);max-width:880px;font-size:14.5px}
+
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:18px}
+  .grid{display:grid;gap:16px}
+
+  .pill{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px;border:1px solid var(--line);white-space:nowrap}
+  .pill.leaf{color:var(--leaf2);border-color:var(--leaf-dim);background:rgba(58,125,68,.12)}
+  .pill.gold{color:var(--gold2);border-color:var(--gold-dim);background:rgba(212,160,23,.12)}
+  .pill.red{color:#e08e79;border-color:#5a2c20;background:rgba(192,87,63,.12)}
+  .pill.blue{color:#9cc4dc;border-color:#2a4453;background:rgba(90,143,176,.12)}
+  .pill.ghost{color:var(--muted)}
+  .con{font-family:ui-monospace,monospace;font-size:11px;color:var(--gold2);font-weight:700}
+
+  /* ===== View 1 thesis ===== */
+  .thesis{display:grid;grid-template-columns:1fr auto 1fr;gap:18px;align-items:stretch}
+  .thesis .arrow{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;min-width:64px}
+  .thesis .arrow .glyph{font-size:34px;color:var(--gold)}
+  .thesis .arrow .lbl{writing-mode:vertical-rl;transform:rotate(180deg);font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--faint);font-weight:700}
+  .panel-asis{border-color:#4a2c22;background:linear-gradient(180deg,rgba(192,87,63,.07),transparent)}
+  .panel-tobe{border-color:var(--leaf-dim);background:linear-gradient(180deg,rgba(58,125,68,.10),transparent)}
+  .panel-h{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+  .panel-h h3{margin:0;font-size:18px}
+  .blist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
+  .blist li{display:flex;gap:11px;font-size:13.5px;color:var(--ink)}
+  .blist li .ic{flex:0 0 auto;width:22px;height:22px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:12px;margin-top:1px}
+  .panel-asis .ic{background:rgba(192,87,63,.15);color:#e08e79}
+  .panel-tobe .ic{background:rgba(58,125,68,.18);color:var(--leaf2)}
+  .blist li b{color:#fff}
+  .blist li small{color:var(--muted);display:block;font-size:12px;margin-top:1px}
+  .thesis-foot{margin-top:18px}
+
+  /* ===== View 2 primitives ===== */
+  .prim-wrap{display:grid;grid-template-columns:1.05fr .95fr;gap:20px;align-items:start}
+  @media(max-width:980px){.prim-wrap{grid-template-columns:1fr}}
+  .prim-stage{position:relative;display:flex;flex-direction:column;gap:14px}
+  .prim-node{
+    border:1px solid var(--line);border-radius:14px;padding:16px 16px;cursor:pointer;
+    background:var(--panel);transition:.18s;position:relative;overflow:hidden;
+  }
+  .prim-node::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--accent,var(--leaf))}
+  .prim-node:hover{transform:translateX(3px);border-color:var(--leaf-dim)}
+  .prim-node.sel{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent), var(--shadow)}
+  .prim-node .pn-h{display:flex;align-items:center;gap:12px}
+  .prim-node .pn-ico{width:40px;height:40px;border-radius:11px;flex:0 0 auto;display:flex;align-items:center;justify-content:center;font-size:20px;background:var(--accent-dim,rgba(58,125,68,.16))}
+  .prim-node h3{margin:0;font-size:16.5px}
+  .prim-node .pn-sub{font-size:12.5px;color:var(--muted);margin-top:2px}
+  .prim-flow{text-align:center;color:var(--faint);font-size:11.5px;font-weight:700;letter-spacing:.5px;padding:2px 0}
+  .prim-flow span{color:var(--gold2)}
+  .prim-detail{position:sticky;top:84px}
+  .prim-detail .card{min-height:280px}
+  .pd-tags{display:flex;gap:7px;flex-wrap:wrap;margin:10px 0 14px}
+  .pd-list{list-style:none;margin:14px 0 0;padding:0;display:flex;flex-direction:column;gap:11px}
+  .pd-list li{font-size:13.5px;color:var(--ink);padding-left:18px;position:relative}
+  .pd-list li::before{content:"›";position:absolute;left:0;color:var(--gold);font-weight:800}
+  .compose-note{margin-top:16px;padding:12px 14px;border-radius:10px;background:var(--panel2);border:1px dashed var(--line);font-size:12.5px;color:var(--muted)}
+
+  /* ===== View 3 composability ===== */
+  .manifest-flow{display:flex;align-items:center;gap:14px;flex-wrap:wrap;justify-content:center;margin:6px 0 24px}
+  .mf-box{border:1px solid var(--line);border-radius:12px;padding:14px 18px;text-align:center;background:var(--panel);min-width:150px}
+  .mf-box .t{font-weight:700;font-size:14px}
+  .mf-box .d{font-size:11.5px;color:var(--muted);margin-top:3px}
+  .mf-arrow{color:var(--gold);font-size:24px}
+  .mf-targets{display:flex;gap:10px}
+  .mf-tg{border:1px solid var(--leaf-dim);background:rgba(58,125,68,.10);border-radius:10px;padding:9px 13px;font-size:12.5px;font-weight:600;color:var(--leaf2)}
+  .samples{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+  @media(max-width:900px){.samples{grid-template-columns:repeat(2,1fr)}}
+  @media(max-width:560px){.samples{grid-template-columns:1fr}}
+  .sample{border:1px solid var(--line);border-radius:12px;padding:15px;background:var(--panel);transition:.15s}
+  .sample:hover{border-color:var(--leaf-dim);transform:translateY(-2px)}
+  .sample .s-h{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
+  .sample h4{margin:0;font-size:14.5px}
+  .sample .s-path{font-size:11px;color:var(--faint);font-family:ui-monospace,monospace}
+  .sample p{margin:8px 0 12px;font-size:12.5px;color:var(--muted)}
+  .sample .s-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+
+  /* ===== View 4 phases ===== */
+  .timeline{display:flex;gap:8px;overflow-x:auto;padding:6px 2px 16px}
+  .tl-node{
+    flex:1 1 0;min-width:120px;border:1px solid var(--line);border-radius:12px;padding:13px 12px;cursor:pointer;
+    background:var(--panel);transition:.16s;position:relative;
+  }
+  .tl-node:hover{border-color:var(--leaf-dim)}
+  .tl-node.sel{border-color:var(--gold);background:linear-gradient(180deg,rgba(212,160,23,.12),transparent);box-shadow:var(--shadow)}
+  .tl-node .ph{font-size:11px;font-weight:800;color:var(--gold2);letter-spacing:1px}
+  .tl-node .pt{font-size:13px;font-weight:700;margin-top:4px}
+  .tl-node .pc{font-size:11px;color:var(--muted);margin-top:5px}
+  .tl-node .dotrow{display:flex;gap:3px;margin-top:9px}
+  .tl-node .dot{width:7px;height:7px;border-radius:50%;background:var(--line)}
+  .tl-node .dot.on{background:var(--leaf2)}
+  .tl-conn{display:flex;align-items:center;color:var(--faint);font-size:18px;flex:0 0 auto;padding:0 1px}
+  .phase-detail{margin-top:20px}
+  .task-row{display:grid;grid-template-columns:88px 1fr auto;gap:14px;align-items:center;padding:12px 14px;border:1px solid var(--line);border-radius:11px;background:var(--panel);margin-bottom:9px}
+  .task-row .co{font-family:ui-monospace,monospace;font-weight:700;color:var(--gold2);font-size:13px}
+  .task-row .tn b{display:block;font-size:13.5px}
+  .task-row .tn small{color:var(--muted);font-size:12px}
+  .task-row .tmeta{display:flex;gap:7px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+
+  .badge{font-size:10.5px;font-weight:800;letter-spacing:.4px;text-transform:uppercase;padding:3px 8px;border-radius:6px}
+  .badge.built{background:rgba(58,125,68,.22);color:var(--leaf2);border:1px solid var(--leaf-dim)}
+  .badge.merged{background:rgba(90,143,176,.18);color:#9cc4dc;border:1px solid #2a4453}
+  .badge.green{background:rgba(82,163,95,.18);color:#7fd08c;border:1px solid var(--leaf-dim)}
+  .badge.tasked{background:rgba(212,160,23,.16);color:var(--gold2);border:1px solid var(--gold-dim)}
+  .badge.proposed{background:rgba(155,168,147,.12);color:var(--muted);border:1px solid var(--line)}
+  .nat{font-size:11px;color:var(--faint)}
+  .nat.invasive{color:#e08e79}
+
+  /* ===== View 5 estate ===== */
+  .filters{display:flex;flex-direction:column;gap:12px;margin-bottom:18px}
+  .frow{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .frow .flabel{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:var(--faint);min-width:74px}
+  .chip{background:var(--panel);border:1px solid var(--line);color:var(--muted);padding:5px 11px;border-radius:999px;cursor:pointer;font-size:12px;font-weight:600;transition:.13s;user-select:none}
+  .chip:hover{color:var(--ink);border-color:var(--leaf-dim)}
+  .chip.on{background:linear-gradient(180deg,rgba(58,125,68,.30),rgba(58,125,68,.12));color:#eafbe9;border-color:var(--leaf)}
+  .chip.on.v-absorb{background:linear-gradient(180deg,rgba(212,160,23,.28),rgba(212,160,23,.10));border-color:var(--gold);color:var(--gold2)}
+  .chip.on.v-skip{background:linear-gradient(180deg,rgba(192,87,63,.26),rgba(192,87,63,.10));border-color:var(--red);color:#e08e79}
+  .estate-count{font-size:12.5px;color:var(--muted);margin-left:auto}
+  .estate-count b{color:var(--ink)}
+  .tooltbl{width:100%;border-collapse:separate;border-spacing:0 7px}
+  .tooltbl th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:1px;color:var(--faint);padding:0 12px 4px;font-weight:800}
+  .tooltbl td{background:var(--panel);border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:11px 12px;vertical-align:middle;font-size:13px}
+  .tooltbl tr td:first-child{border-left:1px solid var(--line);border-radius:10px 0 0 10px}
+  .tooltbl tr td:last-child{border-right:1px solid var(--line);border-radius:0 10px 10px 0}
+  .tooltbl tr.compose td:first-child{border-left:3px solid var(--leaf)}
+  .tooltbl tr.absorb td:first-child{border-left:3px solid var(--gold)}
+  .tooltbl tr.skip td:first-child{border-left:3px solid var(--red)}
+  .tooltbl .tname{font-weight:700;color:#fff}
+  .tooltbl .tdesc{display:block;font-size:11.5px;color:var(--muted);font-weight:400;margin-top:2px;max-width:340px}
+  .vd{font-weight:800;font-size:12px}
+  .vd.compose{color:var(--leaf2)}
+  .vd.absorb{color:var(--gold2)}
+  .vd.skip{color:#e08e79}
+  .mode-tag{font-family:ui-monospace,monospace;font-size:11px;color:var(--blue)}
+  @media(max-width:820px){
+    .tooltbl thead{display:none}
+    .tooltbl,.tooltbl tbody,.tooltbl tr,.tooltbl td{display:block;width:100%}
+    .tooltbl tr{margin-bottom:10px}
+    .tooltbl td{border:none!important;border-radius:0!important}
+    .tooltbl tr td:first-child{border-radius:10px 10px 0 0!important;border-top:1px solid var(--line)!important;border-left:1px solid var(--line)!important;border-right:1px solid var(--line)!important}
+    .tooltbl tr td:last-child{border-radius:0 0 10px 10px!important;border-bottom:1px solid var(--line)!important;border-left:1px solid var(--line)!important;border-right:1px solid var(--line)!important}
+    .tooltbl tr.compose td:first-child{border-left:3px solid var(--leaf)!important}
+    .tooltbl tr.absorb td:first-child{border-left:3px solid var(--gold)!important}
+    .tooltbl tr.skip td:first-child{border-left:3px solid var(--red)!important}
+  }
+
+  /* ===== View 6 invariants ===== */
+  .ponytail-banner{
+    border:1px solid var(--gold-dim);border-radius:16px;padding:20px 22px;margin-bottom:22px;
+    background:linear-gradient(110deg,rgba(212,160,23,.14),rgba(212,160,23,.03));
+    display:flex;gap:18px;align-items:center;
+  }
+  .ponytail-banner .star{font-size:32px;flex:0 0 auto}
+  .ponytail-banner h3{margin:0 0 4px;font-size:18px;color:var(--gold2)}
+  .ponytail-banner p{margin:0;font-size:13.5px;color:var(--ink)}
+  .ponytail-banner .src{font-family:ui-monospace,monospace;font-size:11px;color:var(--faint)}
+  .inv-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:15px}
+  @media(max-width:900px){.inv-grid{grid-template-columns:repeat(2,1fr)}}
+  @media(max-width:600px){.inv-grid{grid-template-columns:1fr}}
+  .inv{border:1px solid var(--line);border-radius:13px;padding:17px;background:var(--panel);position:relative}
+  .inv .ik{position:absolute;top:14px;right:16px;font-size:26px;font-weight:800;color:var(--leaf-dim);opacity:.7}
+  .inv h4{margin:0 0 9px;font-size:15px;padding-right:30px}
+  .inv p{margin:0;font-size:12.8px;color:var(--muted)}
+  .inv .tagline{display:inline-block;margin-top:11px;font-size:11px;font-weight:700;color:var(--leaf2);background:rgba(58,125,68,.12);border:1px solid var(--leaf-dim);padding:3px 9px;border-radius:7px}
+
+  .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11.5px;color:var(--muted);margin-top:14px}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .legend i{width:10px;height:10px;border-radius:3px;display:inline-block}
+
+  footer.foot{max-width:1280px;margin:0 auto;padding:0 22px 50px;color:var(--faint);font-size:11.5px}
+  .hr{height:1px;background:var(--line);margin:22px 0}
+  .section-title{font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:1.4px;color:var(--gold);margin:26px 0 12px}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="top-inner">
+    <div class="brand">
+      <div class="logo">CO</div>
+      <div>
+        <h1>Architecture Refactor &mdash; AS&nbsp;IS&nbsp;→&nbsp;TO&nbsp;BE</h1>
+        <div class="sub">Monolith-with-tenants &rarr; generalist, composable, self-hostable agent platform &nbsp;·&nbsp; baseline v3.22.0</div>
+      </div>
+    </div>
+    <nav class="views" id="nav"></nav>
+  </div>
+</header>
+
+<main id="main"></main>
+
+<footer class="foot">
+  Sources: <code>co/docs/proposals/architecture-refactor.md</code> ·
+  <code>ArteLonga/docs/TOOL-REVIEW.md</code> ·
+  <code>ArteLonga/docs/REFACTOR-PLAYBOOK.md</code>.
+  &nbsp;Backlog CO-503…CO-534. &nbsp;Fully offline — no network calls.
+</footer>
+
+<script>
+/* =========================================================================
+   DATA  (embedded from the three source docs)
+   ========================================================================= */
+
+const DATA = {
+  asis: [
+    {ic:"⛓", t:"Rust monolith with embedded tenant", d:"<code>co-web/src/universes/quilombo/</code> — a private customer's backend lives inside the open repo."},
+    {ic:"🗺", t:"Hardcoded universe→repo mappings", d:"Adding content needs a Rust change + deploy."},
+    {ic:"🧠", t:"Brain lives outside the product", d:"The agentic loop is a separate non-git Python service (<code>tools/whatsapp-bot</code>) — unversioned, not reusable."},
+    {ic:"🔧", t:"Only 3 in-binary tools", d:"github · claude · obsidian. Adding a capability meant a binary recompile."},
+    {ic:"🎨", t:"Hand-rolled vanilla-TS SPA", d:"~7 deps, no component library, no Tailwind. Every surface bespoke; a11y/dark-mode re-done per page."},
+    {ic:"🔍", t:"No vector / retrieval layer", d:"No embeddings, no RAG, no sovereign representation for sacred corpora."},
+    {ic:"🧪", t:"lib-vs-integration test gap", d:"Library tests pass while integration seams break (StaaS wave). No contract-test tier."}
+  ],
+  tobe: [
+    {ic:"🧩", t:"Three composable primitives", d:"<b>Agents</b> (model-agnostic Backend) · <b>Tools</b> (one canonical contract) · <b>Vectorizers</b> (representation-agnostic)."},
+    {ic:"🧠", t:"Agent runtime moves INTO co", d:"The tool-calling loop is promoted into the product (CO-504); the bot becomes one thin client — an <i>agente</i>, not a bot."},
+    {ic:"🔌", t:"Tools by manifest, no recompile", d:"in-binary OR any external OSS via <code>tools/schema.yaml</code>. Explicitly <b>NOT MCP</b>."},
+    {ic:"🌍", t:"Generalist core, no tenant hardcoding", d:"De-embed quilombo; DB-driven mappings. Private repos = data, not code."},
+    {ic:"🏠", t:"Self-host-first", d:"Ollama-local default, sqlite-vec in the canonical DB, security kit + CO-497 data-residency. Nothing phones home."},
+    {ic:"🛡", t:"Contract-tested boundaries", d:"A dedicated contract-test tier (CO-520) closes the lib-vs-integration gap for every primitive seam."},
+    {ic:"🧬", t:"Template IS the software", d:"Builds, distributes & e2e-tests with ZERO universe examples (CO-530). Content is a runtime add-on."}
+  ],
+
+  primitives: [
+    {
+      id:"agents", icon:"🤖", accent:"#52a35f", accentDim:"rgba(58,125,68,.18)",
+      name:"AGENTS", tag:"model-agnostic Backend trait",
+      cos:[["CO-504","tasked"],["CO-505","tasked"],["CO-507","tasked"],["CO-508","tasked"],["CO-532","proposed"]],
+      lede:"One trait abstracts the model provider; the tool-calling loop lives inside co.",
+      points:[
+        "<b>Ollama-local is the default</b> (sovereignty + cost); Claude and any OpenAI-compatible endpoint are drop-ins.",
+        "The agent <i>runtime</i> is promoted into <code>co</code> (CO-504) — the brain that was the external Python bot.",
+        "Personas (<code>agents/*.md</code>) become <b>capability packs</b> (CO-505).",
+        "vLLM is a <i>config swap behind the trait</i> — scaling serving is not a rewrite.",
+        "<b>headroom</b> context-compression absorbed into the window (CO-532) — fewer tokens, same task."
+      ],
+      composes:"Agents <b>call</b> Tools and <b>use</b> Vectorizers."
+    },
+    {
+      id:"tools", icon:"🔧", accent:"#d4a017", accentDim:"rgba(212,160,23,.18)",
+      name:"TOOLS", tag:"one canonical contract — NOT MCP",
+      cos:[["CO-503","built"],["CO-521","tasked"],["CO-523","tasked"]],
+      lede:"name / description / JSON input_schema / run(args) → result.",
+      points:[
+        "<code>tool_type: deterministic | predictive</code>, plus <code>command</code> / <code>url</code> / <code>dependencies</code> fields.",
+        "A tool is <b>in-binary OR any external OSS by manifest</b> (<code>tools/schema.yaml</code>). Adding one needs <b>no recompile</b>.",
+        "<b>Explicitly NOT MCP.</b> External frameworks plug in as one manifest row (local service/CLI), keeping everything on one box.",
+        "CO-503 already built (PR #324) — everything below registers through it.",
+        "Reference adapters: yt-summarizer (predictive), CO-521 deterministic batch."
+      ],
+      composes:"Tools <b>feed and use</b> Vectorizers; Agents <b>call</b> Tools."
+    },
+    {
+      id:"vectorizers", icon:"📐", accent:"#5a8fb0", accentDim:"rgba(90,143,176,.18)",
+      name:"VECTORIZERS", tag:"representation-agnostic trait",
+      cos:[["CO-517","tasked"]],
+      lede:"Returns one of { Dense(Vec<f32>) · Sparse(Vec<(u32,f32)>) · Numeric(Vec<f32>) }.",
+      points:[
+        "<b>Neural</b> — BGE-M3, nomic-v2-moe (via local Ollama).",
+        "<b>Statistical</b> — BM25/FTS5, PPMI + truncated-SVD.",
+        "<b>Raw-numeric</b> — hand-built feature vectors.",
+        "The trait makes the non-neural fallback a <b>citizen, not a toy</b> — essential for low-resource sacred corpora.",
+        "Store: <b>sqlite-vec</b> in the canonical <code>data.db</code> — one file, one backup, one transaction, sovereignty for free."
+      ],
+      composes:"Vectorizers are <b>fed by</b> Tools and <b>used by</b> Agents."
+    }
+  ],
+
+  modes:[
+    {m:"co503-addon", d:"one manifest row, local service/CLI — NOT MCP", cost:"zero binary"},
+    {m:"technique", d:"absorb the method, no new dep", cost:"minimal, in-binary"},
+    {m:"skill", d:".claude/skills layer (dev agent, not product)", cost:"zero product"},
+    {m:"frontend-dep", d:"co-web / yggdrasil front only, never the core", cost:"front only"},
+    {m:"ours-not-import", d:"build our own; the external is a concept", cost:"reuse a primitive"},
+    {m:"freeze / reference", d:"catalogued, not wired", cost:"zero"}
+  ],
+
+  samples:[
+    {name:"topology", path:"examples/integrations/topology/", type:"deterministic",
+     d:"comunicacao meaning-topology; PPMI offline / neural overlay.", co:"CO-528", mode:"co503-addon + technique"},
+    {name:"embed", path:"examples/integrations/embed/", type:"deterministic",
+     d:"Embeddings as a tool → feeds the Vectorizer + sqlite-vec.", co:"CO-517", mode:"co503-addon"},
+    {name:"rag-service", path:"examples/integrations/rag-service/", type:"predictive",
+     d:"LlamaIndex / agentic RAG behind the manifest (local FastAPI).", co:"CO-525", mode:"co503-addon"},
+    {name:"voicebox", path:"examples/integrations/voicebox/", type:"predictive",
+     d:"Local STT/TTS voice stack as a thin client of the runtime.", co:"CO-531", mode:"co503-addon"},
+    {name:"r-stats", path:"examples/integrations/r-stats/", type:"deterministic",
+     d:"R/RStudio — any R script as a tool; stateful REPL = session/kernel.", co:"CO-524", mode:"co503-addon"},
+    {name:"ui-web-awesome", path:"examples/integrations/ui-web-awesome/", type:"frontend",
+     d:"Web Awesome (Shoelace v3) — UI without rewrite, CSS-var theming.", co:"CO-526", mode:"frontend-dep"}
+  ],
+
+  phases:[
+    {id:"P0", title:"Safety net & isolation", note:"Do first — unblocks everything. The StaaS wave proved lib tests pass while integration breaks.",
+     tasks:[
+       {co:"CO-519", name:"Flaky-test fix", sub:"Stop the bleeding before adding surface.", nat:"additive", status:"tasked"},
+       {co:"CO-520", name:"Contract-test tier", sub:"Closes the lib-vs-integration gap; gate for all later phases.", nat:"invasive (foundational)", status:"tasked"},
+       {co:"CO-516", name:"co-auto worktree isolation", sub:"One-runner substrate; fixes duplicate-agents-in-one-worktree.", nat:"invasive", status:"tasked"}
+     ]},
+    {id:"P1", title:"Generalist core", note:"De-tenant the open repo. Depends on P0 contract tests to prove the seam holds.",
+     tasks:[
+       {co:"CO-509", name:"De-embed quilombo", sub:"Remove co-web/src/universes/quilombo/; private repo = data.", nat:"invasive", status:"tasked"},
+       {co:"CO-510", name:"Scrub private-repo refs", sub:"Finish de-tenanting; DB-driven mappings, no hardcoding.", nat:"invasive", status:"tasked"}
+     ]},
+    {id:"P2", title:"Tool contract", note:"The plug-in seam. Everything below registers through it.",
+     tasks:[
+       {co:"CO-503", name:"Tool contract + adapter", sub:"Merge first — PR #324. The canonical contract.", nat:"built (PR #324)", status:"built"},
+       {co:"CO-521", name:"Extract deterministic tools", sub:"Reference deterministic adapters out of the binary.", nat:"additive", status:"tasked"},
+       {co:"CO-523", name:"External-tool adapter", sub:"The manifest path for any external OSS (NOT MCP).", nat:"additive", status:"tasked"}
+     ]},
+    {id:"P3", title:"Agent runtime → co", note:"The brain belongs in the product. Depends on P2 (the runtime calls tools).",
+     tasks:[
+       {co:"CO-504", name:"Agent runtime (Backend trait)", sub:"Loop moves into co; Ollama default, Claude/OpenAI-compat; vLLM config swap.", nat:"invasive", status:"tasked"},
+       {co:"CO-505", name:"Capability packs", sub:"personas / agents/*.md become packs.", nat:"additive", status:"tasked"},
+       {co:"CO-507", name:"WhatsApp as thin client", sub:"Bot calls the in-co runtime.", nat:"invasive (external)", status:"tasked"},
+       {co:"CO-508", name:"bot → 'agente' rename", sub:"Terminology + client framing.", nat:"additive", status:"tasked"},
+       {co:"CO-532", name:"Context-compression (headroom)", sub:"Absorb the headroom method — fewer tokens, no new dep.", nat:"technique (absorbed)", status:"proposed"}
+     ]},
+    {id:"P4", title:"Vectorizers & retrieval", note:"The representation layer. Depends on P3 (agents use vectorizers) and P2 (RAG tools register via manifest).",
+     tasks:[
+       {co:"CO-517", name:"Vectorizer trait + sqlite-vec + FTS5/BM25 + nomic/BGE-M3 + PPMI", sub:"In-store, sovereign. FTS5/PPMI are absorbed techniques (no dep).", nat:"invasive (new subsystem)", status:"tasked"},
+       {co:"CO-525", name:"Production agentic-RAG add-on", sub:"LlamaIndex(rag) + DSPy(prompt-compile) + RAGAS(eval), local services.", nat:"manifest add-on", status:"tasked"},
+       {co:"CO-534", name:"Wire LlamaIndex / DSPy / RAGAS", sub:"Land CO-525's three add-ons in order (ingest → prompt-compile → eval-gate).", nat:"manifest add-on", status:"proposed"},
+       {co:"CO-533", name:"last30days research add-on", sub:"Research/digest as a CO-503 tool AND a .claude skill; no product code.", nat:"manifest add-on + skill", status:"proposed"}
+     ]},
+    {id:"P5", title:"Composition", note:"On the P0 one-runner substrate. Mine LangGraph & deer-flow checkpoint/HITL ideas (reference, not a second engine).",
+     tasks:[
+       {co:"CO-506", name:"Workflows compose agents/tools/vectorizers", sub:"One worktree-isolated runner shared with co-auto.", nat:"invasive", status:"tasked"},
+       {co:"CO-522 / CO-531", name:"Voice tool (voicebox)", sub:"Predictive tool — STT/TTS as a thin client; OpenMontage catalogued for later.", nat:"manifest add-on", status:"proposed"},
+       {co:"CO-524", name:"R/RStudio-web REPL", sub:"Session/kernel tool via CO-503 (sample r-stats/).", nat:"manifest add-on", status:"tasked"}
+     ]},
+    {id:"P6", title:"Surfaces", note:"Parallelizable once core is stable. Incremental — no framework rewrite.",
+     tasks:[
+       {co:"CO-526", name:"UI component layer (Web Awesome)", sub:"Drop custom elements into existing SPA; no rewrite.", nat:"stack change (frontend), incremental", status:"tasked"},
+       {co:"CO-527", name:"Web game engine (PixiJS v8 → Three.js)", sub:"Render-only client; game-core unchanged.", nat:"stack change (frontend), additive", status:"tasked"}
+     ]}
+  ],
+
+  estate:[
+    // UI
+    {name:"Web Awesome (Shoelace v3)", desc:"Framework-agnostic custom elements; CSS-var theming, a11y + dark inherited.", cat:"UI", mode:"frontend-dep", verdict:"compose", co:"CO-526", status:"tasked", note:"Only mature framework-agnostic option; drops into the vanilla-TS SPA, no rewrite, no Tailwind."},
+    {name:"shadcn-svelte", desc:"Copy-paste component ownership over Bits UI a11y, Svelte 5.", cat:"UI", mode:"frontend-dep", verdict:"skip", co:"CO-526", status:"deferred", note:"Would require a SvelteKit + Tailwind commitment — a separate, deliberate future decision."},
+    // Game
+    {name:"PixiJS v8", desc:"Pure GPU 2D renderer (WebGPU+WebGL2) — not an engine.", cat:"Game", mode:"frontend-dep", verdict:"compose", co:"CO-527", status:"tasked", note:"Render-only matches 'server draws, client renders'; reuses game-core 100%, zero Rust rewrite."},
+    {name:"Three.js", desc:"3D scene-graph / renderer (not an engine); largest ecosystem.", cat:"Game", mode:"frontend-dep", verdict:"compose", co:"CO-527", status:"tasked", note:"3D north-star — 'engine-neutral' stays literal, game-core stays the authoritative brain."},
+    {name:"Phaser / Excalibur / Babylon / Godot→HTML5", desc:"Full engines that want to own the loop, or heavy export.", cat:"Game", mode:"reference", verdict:"skip", co:"CO-527", status:"skip", note:"A full engine demotes/duplicates game-core; Godot→HTML5 gives no extra reuse and weighs ~40 MB."},
+    // Agentic
+    {name:"LlamaIndex (+ LlamaParse)", desc:"Ingestion/RAG pipeline; 150+ connectors, agentic OCR over 130+ formats.", cat:"Agentic", mode:"co503-addon", verdict:"compose", co:"CO-525 / CO-534", status:"tasked", note:"Fills the ingestion the Vectorizer lacks (mbya PDF / NotebookLM / grcsamazonia _source); local FastAPI."},
+    {name:"DSPy (MIPROv2)", desc:"Offline prompt optimizer (instructions + few-shot exemplars).", cat:"Agentic", mode:"co503-addon + technique", verdict:"compose", co:"CO-525 / CO-534", status:"tasked", note:"Self-optimizes prompts (+10–40% reported) without touching weights; output is a committed string."},
+    {name:"RAGAS (+ faithfulness judge)", desc:"Objective RAG/prompt evaluation layer.", cat:"Agentic", mode:"co503-addon", verdict:"compose", co:"CO-525 / CO-534", status:"tasked", note:"The measurement gate CO lacks; gives DSPy the metric to optimize. Judge runs on local Ollama."},
+    {name:"deer-flow", desc:"Long-running / deep-research multi-step agent.", cat:"Agentic", mode:"technique", verdict:"absorb", co:"CO-506", status:"reference", note:"Mine checkpoint-per-stage + interrupt-for-approval into CO-506; do not run a second engine."},
+    {name:"CrewAI / LangGraph / AutoGen", desc:"Multi-agent orchestration frameworks.", cat:"Agentic", mode:"reference", verdict:"skip", co:"CO-506", status:"skip", note:"Overlap CO-504/506; one-runner discipline. Mine LangGraph HITL ideas; AutoGen in maintenance."},
+    {name:"vLLM", desc:"High-throughput serving (continuous batching, PagedAttention).", cat:"Agentic", mode:"technique", verdict:"compose", co:"CO-504", status:"tasked", note:"The endpoint the Backend trait points at — a config swap under multi-user load. Ollama stays default."},
+    {name:"Ollama", desc:"Local OpenAI-compatible serving (Metal, M4).", cat:"Agentic", mode:"technique", verdict:"compose", co:"CO-504", status:"in use", note:"The local-first default behind the Backend trait — sovereignty + cost."},
+    // Vectors
+    {name:"sqlite-vec", desc:"Vector store inside SQLite (vec0).", cat:"Vectors", mode:"co503-addon", verdict:"compose", co:"CO-517", status:"tasked", note:"Vectors become rows next to entries in data.db: one file, one backup, one transaction, sovereignty for free."},
+    {name:"BGE-M3", desc:"Multilingual hybrid embedder (dense + sparse in one pass).", cat:"Vectors", mode:"co503-addon", verdict:"compose", co:"CO-517", status:"tasked", note:"Only local model with measured low-resource results (Yorùbá/MIRACL); maps onto the neural+statistical split."},
+    {name:"nomic-embed-text-v2-moe", desc:"MoE Apache embedder, Matryoshka 256-dim, ollama pull.", cat:"Vectors", mode:"co503-addon", verdict:"compose", co:"CO-517", status:"tasked", note:"Fast PT/general default; 256-dim = 3× smaller / 3× faster brute-force scan in sqlite-vec."},
+    {name:"FTS5 / BM25", desc:"SQLite-native lexical channel.", cat:"Vectors", mode:"technique", verdict:"absorb", co:"CO-517", status:"tasked", note:"Always-on, free, in-store; robust on languages no model covers."},
+    {name:"PPMI + truncated-SVD", desc:"Model-free sovereign representation (the model IS the corpus).", cat:"Vectors", mode:"technique", verdict:"absorb", co:"CO-517", status:"tasked", note:"Defensible answer for sacred corpora: no pretrained bias, deterministic, reproducible."},
+    {name:"sqlite-vss / Qdrant / pgvector / FAISS", desc:"Alternative stores (deprecated / daemon / re-platform / no persistence).", cat:"Vectors", mode:"reference", verdict:"skip", co:"CO-517", status:"skip", note:"Second daemon or re-platform; violates 'SQLite canonical, one box'. LanceDB kept as a per-universe ANN escape hatch."},
+    // Voz
+    {name:"voicebox", desc:"Local STT/TTS voice stack.", cat:"Voz", mode:"co503-addon", verdict:"compose", co:"CO-522 / CO-531", status:"tasked", note:"Predictive tool by manifest; voice becomes just another client of the runtime, zero new binary."},
+    {name:"OpenMontage", desc:"Video generation / montage.", cat:"Voz", mode:"co503-addon", verdict:"compose", co:"CO-522", status:"catalogued", note:"Legit video add-on by manifest when demand appears; not on the critical path now."},
+    // Contexto
+    {name:"headroom", desc:"Context compression (agent window management).", cat:"Contexto", mode:"technique", verdict:"absorb", co:"CO-504 / CO-532", status:"tasked", note:"Compression method straight into the agent runtime — fewer tokens, same task. Pure ponytail."},
+    // Dev
+    {name:"last30days-skill", desc:"Last-30-days research/digest of a topic.", cat:"Dev", mode:"co503-addon", verdict:"compose", co:"CO-533", status:"tasked", note:"Research add-on by manifest AND a .claude skill; feeds digests/leads with no new product code."},
+    {name:"mattpocock/skills", desc:"Collection of TS/dev skills.", cat:"Dev", mode:"skill", verdict:"absorb", co:"—", status:"reference", note:"Mine & reuse in our .claude/skills layer; not a product dependency."},
+    {name:"odysseus", desc:"Self-host workspace for agents.", cat:"Dev", mode:"reference", verdict:"skip", co:"—", status:"reference", note:"Learn the self-host pattern; our path is already self-host-first (security kit + CO-497)."},
+    // Data
+    {name:"daily_stock_analysis", desc:"Daily stock-analysis pipeline.", cat:"Data", mode:"freeze", verdict:"skip", co:"—", status:"freeze", note:"Would fit as a manifest tool, but trading is dormant. Frozen until explicit revival."},
+    {name:"R / RStudio (Rscript)", desc:"Statistics / REPL as a tool.", cat:"Data", mode:"co503-addon", verdict:"compose", co:"CO-524", status:"tasked", note:"Any R script becomes a deterministic tool; stateful REPL = session/kernel."},
+    // Memory
+    {name:"codebase-memory-mcp", desc:"Codebase memory via an MCP server.", cat:"Memory", mode:"ours-not-import", verdict:"skip", co:"CO-74 / universe-atlas", status:"ours", note:"Invariant: no MCP. The concept is already ours — universe-atlas + typed CO-74 relations. Build, don't import."}
+  ],
+
+  invariants:[
+    {k:"a", title:"Template = Software", body:"The software builds, distributes & e2e-tests with ZERO universe examples. Content is a runtime add-on (subscription / manifest / artifact), never embedded. Enforced by a clean-env CI guard.", tag:"CO-530"},
+    {k:"b", title:"Three composable primitives", body:"Agents (model-agnostic Backend) · Tools (one canonical contract, in-binary OR external by manifest — NOT MCP) · Vectorizers (representation-agnostic).", tag:"CO-503 / 504 / 517"},
+    {k:"c", title:"Generalist", body:"No hardcoded tenant names; DB-driven mappings (adding content needs no deploy). Private repos are DATA, not docs — never referenced in open repos.", tag:"CO-509 / 510"},
+    {k:"d", title:"Self-host-first", body:"Full self-host (Ollama + SQLite + encrypted secrets, zero third parties) or managed infra with consented collection. CO-497 data-residency: sensitive data stays on the instance.", tag:"CO-497"},
+    {k:"e", title:"Contract-tested boundaries", body:"Every cross-process / cross-repo seam is pinned by a contract-test. No contract = no boundary, just implicit coupling that breaks silently.", tag:"CO-520"},
+    {k:"f", title:"Sovereignty / CARE gate", body:"For sacred corpora (Ayvu Rapytã, Ifá Odù): custodians define access, not us. Pipeline releasable only with consented sources. Enforced by the sacred-boundary review axis.", tag:"mbya · CARE"}
+  ]
+};
+
+/* =========================================================================
+   VIEW RENDERERS
+   ========================================================================= */
+
+const VIEWS = [
+  {id:"thesis",       n:"1", label:"Thesis"},
+  {id:"primitives",   n:"2", label:"3 Primitives"},
+  {id:"composability",n:"3", label:"Composability"},
+  {id:"phases",       n:"4", label:"Phase plan"},
+  {id:"estate",       n:"5", label:"Tool estate"},
+  {id:"invariants",   n:"6", label:"Invariants"}
+];
+
+const el = (tag, cls, html) => { const e=document.createElement(tag); if(cls)e.className=cls; if(html!=null)e.innerHTML=html; return e; };
+function badge(s){
+  const map={built:"built",merged:"merged",green:"green",tasked:"tasked",proposed:"proposed",
+             deferred:"proposed",skip:"proposed","in use":"green",catalogued:"proposed",
+             reference:"proposed",freeze:"proposed",ours:"proposed"};
+  return `<span class="badge ${map[s]||'proposed'}">${s}</span>`;
+}
+
+/* ---- View 1: Thesis ---- */
+function renderThesis(){
+  const wrap = el("div","view-inner");
+  wrap.appendChild(headBlock("The thesis","AS&nbsp;IS → TO&nbsp;BE",
+    "CO is a Rust monolith that embeds a private tenant, ships a hand-rolled SPA, exposes only 3 in-binary tools, and runs its agentic loop in a separate non-git Python service. The refactor turns it into a generalist, composable, self-hostable agent platform built on three primitives."));
+
+  const t = el("div","thesis");
+
+  const left = el("div","card panel-asis");
+  left.appendChild(rowHead("AS IS","red","monolith-with-embedded-tenants"));
+  left.appendChild(bullets(DATA.asis,"panel-asis"));
+
+  const arrow = el("div","arrow");
+  arrow.innerHTML = `<div class="lbl">refactor</div><div class="glyph">→</div><div class="lbl">compose</div>`;
+
+  const right = el("div","card panel-tobe");
+  right.appendChild(rowHead("TO BE","leaf","generalist · composable · self-hostable"));
+  right.appendChild(bullets(DATA.tobe,"panel-tobe"));
+
+  t.appendChild(left); t.appendChild(arrow); t.appendChild(right);
+  wrap.appendChild(t);
+
+  const foot = el("div","card thesis-foot");
+  foot.innerHTML = `<div style="display:flex;gap:14px;align-items:flex-start">
+     <div style="font-size:22px">⭐</div>
+     <div><b style="color:var(--gold2)">The connective tissue:</b>
+     the agent runtime moves <b>into co</b> (CO-504); the WhatsApp bot becomes one thin client.
+     Self-host-first — nothing in the recommended path makes a network call. Composability + a
+     contract-test tier (CO-520) tie agents, tools and vectorizers into workflows (CO-506),
+     unified with co-auto on one worktree-isolated runner (CO-516).</div></div>`;
+  wrap.appendChild(foot);
+  return wrap;
+}
+function rowHead(title,color,sub){
+  const h=el("div","panel-h");
+  h.innerHTML=`<h3>${title}</h3><span class="pill ${color}">${sub}</span>`;
+  return h;
+}
+function bullets(items,cls){
+  const ul=el("ul","blist");
+  items.forEach(i=>{
+    const li=el("li");
+    li.innerHTML=`<span class="ic">${i.ic}</span><span><b>${i.t}</b><small>${i.d}</small></span>`;
+    ul.appendChild(li);
+  });
+  return ul;
+}
+
+/* ---- View 2: Primitives ---- */
+let primSel="agents";
+function renderPrimitives(){
+  const wrap=el("div");
+  wrap.appendChild(headBlock("The TO-BE core","Three composable primitives",
+    "Everything in the platform is a composition of three model-agnostic, representation-agnostic, self-hostable primitives. Click a node to expand its detail."));
+  const grid=el("div","prim-wrap");
+
+  const stage=el("div","prim-stage");
+  DATA.primitives.forEach((p,idx)=>{
+    const node=el("div","prim-node"+(p.id===primSel?" sel":""));
+    node.style.setProperty("--accent",p.accent);
+    node.style.setProperty("--accent-dim",p.accentDim);
+    node.dataset.id=p.id;
+    node.innerHTML=`<div class="pn-h">
+        <div class="pn-ico">${p.icon}</div>
+        <div><h3>${p.name}</h3><div class="pn-sub">${p.tag}</div></div>
+      </div>`;
+    node.onclick=()=>{primSel=p.id;renderInto();};
+    stage.appendChild(node);
+    if(idx<DATA.primitives.length-1){
+      const flow=el("div","prim-flow", idx===0
+        ? `Agents <span>call</span> Tools &nbsp;↓`
+        : `Tools <span>feed / use</span> Vectorizers &nbsp;↓`);
+      stage.appendChild(flow);
+    }
+  });
+
+  const detailWrap=el("div","prim-detail");
+  detailWrap.appendChild(primDetail(DATA.primitives.find(p=>p.id===primSel)));
+
+  grid.appendChild(stage);
+  grid.appendChild(detailWrap);
+  wrap.appendChild(grid);
+  return wrap;
+}
+function primDetail(p){
+  const c=el("div","card");
+  c.style.borderColor=p.accent;
+  const cos=p.cos.map(([co,st])=>`<span class="pill" style="border-color:${p.accent}55;color:${p.accent}"><span class="con">${co}</span>${badge(st)}</span>`).join(" ");
+  c.innerHTML=`
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:4px">
+      <div class="pn-ico" style="background:${p.accentDim}">${p.icon}</div>
+      <div><h3 style="margin:0;font-size:18px">${p.name}</h3>
+      <div class="pn-sub">${p.lede}</div></div>
+    </div>
+    <div class="pd-tags">${cos}</div>
+    <ul class="pd-list">${p.points.map(x=>`<li>${x}</li>`).join("")}</ul>
+    <div class="compose-note">🧩 <b>Composes:</b> ${p.composes}</div>`;
+  return c;
+}
+
+/* ---- View 3: Composability ---- */
+function renderComposability(){
+  const wrap=el("div");
+  wrap.appendChild(headBlock("Composability","A tool = a manifest, not a recompile",
+    "Every external tool enters by one of six integration modes, ordered by code cost — almost none add binary code. A tool is a manifest that resolves to one of three runtimes."));
+
+  // ponytail banner
+  const pb=el("div","ponytail-banner");
+  pb.innerHTML=`<div class="star">⭐</div>
+    <div><h3>ponytail — the most efficient code is the one you didn't write</h3>
+    <p>A "full refactor using all these tools" is <b>not</b> cramming them into the binary — it is making them all <b>composable</b> and wiring only the high-value few. Measured by composition, not lines added: <span class="con">manifest &gt; new dep &gt; new binary code</span>.</p>
+    <div class="src">DietrichGebert/ponytail · skip the code that doesn't need to exist</div></div>`;
+  wrap.appendChild(pb);
+
+  // manifest → runtime
+  const flow=el("div","manifest-flow");
+  flow.innerHTML=`
+    <div class="mf-box"><div class="t">📄 a Tool manifest</div><div class="d">tools/schema.yaml · one row</div></div>
+    <div class="mf-arrow">→</div>
+    <div class="mf-targets">
+      <div class="mf-tg">⚙ in-binary</div>
+      <div class="mf-tg">🖥 subprocess (CLI)</div>
+      <div class="mf-tg">🌐 HTTP (local service)</div>
+    </div>`;
+  wrap.appendChild(flow);
+
+  // modes table
+  wrap.appendChild(el("div","section-title","Six integration modes (by code cost)"));
+  const mgrid=el("div","grid");
+  mgrid.style.gridTemplateColumns="repeat(3,1fr)";
+  DATA.modes.forEach(m=>{
+    const c=el("div","card");
+    c.style.padding="13px 15px";
+    c.innerHTML=`<div class="mode-tag" style="font-size:12.5px;font-weight:700">${m.m}</div>
+      <div style="font-size:12.5px;color:var(--muted);margin:5px 0 8px">${m.d}</div>
+      <span class="pill leaf">${m.cost}</span>`;
+    mgrid.appendChild(c);
+  });
+  wrap.appendChild(mgrid);
+
+  // samples
+  wrap.appendChild(el("div","section-title","The 6 runnable samples — proof that any OSS becomes a CO tool by manifest"));
+  const sg=el("div","samples");
+  DATA.samples.forEach(s=>{
+    const tcls = s.type==="predictive"?"gold":(s.type==="frontend"?"blue":"leaf");
+    const c=el("div","sample");
+    c.innerHTML=`
+      <div class="s-h"><h4>${s.name}</h4><span class="pill ${tcls}">${s.type}</span></div>
+      <div class="s-path">${s.path}</div>
+      <p>${s.d}</p>
+      <div class="s-foot"><span class="mode-tag">${s.mode}</span><span class="con">${s.co}</span></div>`;
+    sg.appendChild(c);
+  });
+  wrap.appendChild(sg);
+
+  const note=el("div","card");
+  note.style.marginTop="16px";
+  note.innerHTML=`<span style="color:var(--muted);font-size:13px">The discipline: <b style="color:var(--ink)">manifest &gt; new dep &gt; new binary code</b>; <b style="color:var(--ink)">absorb a technique &gt; import a framework</b>; <b style="color:var(--ink)">reuse a primitive &gt; add a fourth</b>. "Using all of these" means all are <i>available</i> as add-ons — only the high-value few are wired. Net: ~5 wired (manifest/front-dep), ~6 absorbed as techniques, the rest catalogued.</span>`;
+  wrap.appendChild(note);
+  return wrap;
+}
+
+/* ---- View 4: Phases ---- */
+let phaseSel="P0";
+function renderPhases(){
+  const wrap=el("div");
+  wrap.appendChild(headBlock("Refactor plan","P0 → P6 — sequenced phases",
+    "Dependency order: safety+isolation → de-tenant → tool contract → agent runtime → vectors/RAG → workflows → UI/game. Contract tests (P0) are non-negotiably first. Click a phase to see its CO-N tasks."));
+
+  const tl=el("div","timeline");
+  DATA.phases.forEach((p,i)=>{
+    const node=el("div","tl-node"+(p.id===phaseSel?" sel":""));
+    node.dataset.id=p.id;
+    const total=p.tasks.length;
+    const done=p.tasks.filter(t=>t.status==="built"||t.status==="merged"||t.status==="green").length;
+    let dots="";
+    p.tasks.forEach(t=>{ const on=(t.status==="built"||t.status==="merged"||t.status==="green"); dots+=`<span class="dot ${on?'on':''}"></span>`; });
+    node.innerHTML=`<div class="ph">${p.id}</div><div class="pt">${p.title}</div>
+      <div class="pc">${total} task${total>1?'s':''}${done?` · ${done} built`:''}</div>
+      <div class="dotrow">${dots}</div>`;
+    node.onclick=()=>{phaseSel=p.id;renderInto();};
+    tl.appendChild(node);
+    if(i<DATA.phases.length-1) tl.appendChild(el("div","tl-conn","›"));
+  });
+  wrap.appendChild(tl);
+
+  const ph=DATA.phases.find(p=>p.id===phaseSel);
+  const det=el("div","phase-detail");
+  const dh=el("div","card");
+  dh.style.marginBottom="14px";
+  dh.style.borderColor="var(--gold-dim)";
+  dh.innerHTML=`<div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap">
+     <span class="con" style="font-size:15px">${ph.id}</span>
+     <b style="font-size:17px">${ph.title}</b></div>
+     <div style="color:var(--muted);font-size:13px;margin-top:6px">${ph.note}</div>`;
+  det.appendChild(dh);
+
+  ph.tasks.forEach(t=>{
+    const row=el("div","task-row");
+    const natCls = /invasive/.test(t.nat)?"invasive":"";
+    row.innerHTML=`<div class="co">${t.co}</div>
+      <div class="tn"><b>${t.name}</b><small>${t.sub}</small></div>
+      <div class="tmeta"><span class="nat ${natCls}">${t.nat}</span>${badge(t.status)}</div>`;
+    det.appendChild(row);
+  });
+
+  const lg=el("div","legend");
+  lg.innerHTML=`<span><i style="background:var(--leaf2)"></i> built dot</span>
+    ${badge("built")} ${badge("tasked")} ${badge("proposed")}
+    <span style="color:var(--red)">invasive</span> <span>additive / technique</span>`;
+  det.appendChild(lg);
+  wrap.appendChild(det);
+  return wrap;
+}
+
+/* ---- View 5: Estate ---- */
+const estateFilters = {cat:new Set(), mode:new Set(), verdict:new Set()};
+function renderEstate(){
+  const wrap=el("div");
+  wrap.appendChild(headBlock("Review all the tools","The ~30-tool estate registry",
+    "Every external candidate under the ponytail lens — tool · category · mode · verdict · CO-N · status. Filter by category, integration mode, or verdict. The measure: ~5 wired now, ~6 absorbed as techniques, the rest catalogued/frozen/skipped."));
+
+  const cats=[...new Set(DATA.estate.map(t=>t.cat))];
+  const modes=["co503-addon","technique","skill","frontend-dep","ours-not-import","freeze","reference"];
+  const verdicts=["compose","absorb","skip"];
+
+  const filters=el("div","filters");
+  filters.appendChild(chipRow("Category","cat",cats));
+  filters.appendChild(chipRow("Mode","mode",modes));
+  filters.appendChild(chipRow("Verdict","verdict",verdicts,true));
+  wrap.appendChild(filters);
+
+  const tblWrap=el("div");
+  tblWrap.id="estate-tbl";
+  wrap.appendChild(tblWrap);
+  drawEstateTable(tblWrap);
+  return wrap;
+}
+function chipRow(label,key,values,isVerdict){
+  const row=el("div","frow");
+  row.appendChild(el("span","flabel",label));
+  values.forEach(v=>{
+    const sel=estateFilters[key].has(v);
+    const extra = isVerdict ? (" v-"+v) : "";
+    const chip=el("div","chip"+(sel?" on"+extra:""), v);
+    chip.onclick=()=>{
+      if(estateFilters[key].has(v)) estateFilters[key].delete(v);
+      else estateFilters[key].add(v);
+      renderInto();
+    };
+    row.appendChild(chip);
+  });
+  if(key==="cat"){
+    const clear=el("div","chip","✕ clear all");
+    clear.style.marginLeft="6px";
+    clear.onclick=()=>{estateFilters.cat.clear();estateFilters.mode.clear();estateFilters.verdict.clear();renderInto();};
+    row.appendChild(clear);
+  }
+  return row;
+}
+function estateMatch(t){
+  if(estateFilters.cat.size && !estateFilters.cat.has(t.cat)) return false;
+  if(estateFilters.verdict.size && !estateFilters.verdict.has(t.verdict)) return false;
+  if(estateFilters.mode.size){
+    const tomodes = t.mode.split("+").map(s=>s.trim());
+    if(!tomodes.some(m=>estateFilters.mode.has(m))) return false;
+  }
+  return true;
+}
+function drawEstateTable(host){
+  host.innerHTML="";
+  const rows=DATA.estate.filter(estateMatch);
+  const counts={compose:0,absorb:0,skip:0};
+  rows.forEach(r=>counts[r.verdict]++);
+
+  const cnt=el("div","frow");
+  cnt.style.marginBottom="6px";
+  cnt.innerHTML=`<span class="estate-count"><b>${rows.length}</b> / ${DATA.estate.length} tools &nbsp;·&nbsp;
+    <span class="vd compose">${counts.compose} compose</span> &nbsp;
+    <span class="vd absorb">${counts.absorb} absorb</span> &nbsp;
+    <span class="vd skip">${counts.skip} skip</span></span>`;
+  host.appendChild(cnt);
+
+  const tbl=el("table","tooltbl");
+  tbl.innerHTML=`<thead><tr>
+    <th>Tool</th><th>Category</th><th>Mode</th><th>Verdict</th><th>CO-N</th><th>Status</th>
+  </tr></thead>`;
+  const tb=el("tbody");
+  if(rows.length===0){
+    const tr=el("tr"); tr.innerHTML=`<td colspan="6" style="text-align:center;color:var(--muted)">No tools match these filters.</td>`; tb.appendChild(tr);
+  }
+  rows.forEach(t=>{
+    const tr=el("tr",t.verdict);
+    tr.innerHTML=`
+      <td><span class="tname">${t.name}</span><span class="tdesc">${t.desc} <span style="color:var(--faint)">— ${t.note}</span></span></td>
+      <td><span class="pill ghost">${t.cat}</span></td>
+      <td><span class="mode-tag">${t.mode}</span></td>
+      <td><span class="vd ${t.verdict}">${t.verdict}</span></td>
+      <td><span class="con">${t.co}</span></td>
+      <td>${badge(t.status)}</td>`;
+    tb.appendChild(tr);
+  });
+  tbl.appendChild(tb);
+  host.appendChild(tbl);
+}
+
+/* ---- View 6: Invariants ---- */
+function renderInvariants(){
+  const wrap=el("div");
+  wrap.appendChild(headBlock("The spine","Six invariants every refactor preserves",
+    "These are the definition of 'right' above any ticket. A refactor can never break any of them — and ponytail is the governing direction above them all."));
+
+  const pb=el("div","ponytail-banner");
+  pb.innerHTML=`<div class="star">⭐</div>
+    <div><h3>Governing principle — ponytail</h3>
+    <p>The most efficient code is the one you didn't write. Every refactor starts by asking <b>what to delete / decouple / compose</b>, not what to rewrite. Prefer a manifest to new binary code; deletion to generalization; decouple-to-artifact to rewrite; reuse a primitive to creating a fourth. <b>Less binary, more composition</b> — measured by what it removes.</p>
+    <div class="src">DietrichGebert/ponytail · skip the code that doesn't need to exist</div></div>`;
+  wrap.appendChild(pb);
+
+  const grid=el("div","inv-grid");
+  DATA.invariants.forEach(i=>{
+    const c=el("div","inv");
+    c.innerHTML=`<div class="ik">${i.k}</div>
+      <h4>${i.title}</h4>
+      <p>${i.body}</p>
+      <span class="tagline">${i.tag}</span>`;
+    grid.appendChild(c);
+  });
+  wrap.appendChild(grid);
+  return wrap;
+}
+
+/* =========================================================================
+   SHELL
+   ========================================================================= */
+function headBlock(kicker,title,desc){
+  const h=el("div","view-head");
+  h.innerHTML=`<div class="kicker">${kicker}</div><h2>${title}</h2><p>${desc}</p>`;
+  return h;
+}
+
+let current="thesis";
+const RENDER={thesis:renderThesis,primitives:renderPrimitives,composability:renderComposability,
+              phases:renderPhases,estate:renderEstate,invariants:renderInvariants};
+
+function buildNav(){
+  const nav=document.getElementById("nav");
+  nav.innerHTML="";
+  VIEWS.forEach(v=>{
+    const b=el("button"+(v.id===current?"":""),v.id===current?"active":"");
+    b.innerHTML=`<span class="n">${v.n}</span>${v.label}`;
+    b.onclick=()=>{current=v.id;buildNav();renderInto();window.scrollTo({top:0,behavior:"smooth"});};
+    nav.appendChild(b);
+  });
+}
+function renderInto(){
+  const main=document.getElementById("main");
+  main.innerHTML="";
+  const view=el("div","view active");
+  view.appendChild(RENDER[current]());
+  main.appendChild(view);
+}
+
+buildNav();
+renderInto();
+
+// keyboard: 1-6 switch views
+document.addEventListener("keydown",e=>{
+  const i=parseInt(e.key,10);
+  if(i>=1 && i<=6){ current=VIEWS[i-1].id; buildNav(); renderInto(); }
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Web Awesome (Shoelace v3) — CO integration sample</title>
+
+    <!--
+      Web Awesome = Shoelace v3 (Font Awesome team). The AUTOLOADER registers
+      each <wa-*> custom element on first use from the CDN — no build step, no
+      framework, no npm install. Drop these two tags into ANY page (vanilla TS,
+      SvelteKit, plain HTML) and the components light up.
+
+      NOTE: this is a review sample. Pin to the exact beta you adopt before any
+      real use; the early.webawesome.com channel is the beta distribution.
+    -->
+    <link
+      rel="stylesheet"
+      href="https://early.webawesome.com/webawesome@3.0.0-beta.4/dist/styles/webawesome.css"
+    />
+    <script
+      type="module"
+      src="https://early.webawesome.com/webawesome@3.0.0-beta.4/dist/webawesome.loader.js"
+    ></script>
+
+    <style>
+      /*
+        Theming is plain CSS custom properties — NO Tailwind, no utility classes.
+        Override Web Awesome design tokens to match CO's palette. These cascade
+        into every <wa-*> element, so theming the whole component set is a handful
+        of variables, not a config file.
+      */
+      :root {
+        --wa-color-brand-fill-loud: #3b5bdb; /* CO accent */
+        --wa-color-brand-fill-normal: #edf0fb;
+        --wa-color-brand-on-loud: #ffffff;
+        font-family: system-ui, sans-serif;
+      }
+
+      body {
+        margin: 0;
+        padding: 2rem;
+        max-width: 48rem;
+        margin-inline: auto;
+        line-height: 1.5;
+        color: #1c2333;
+      }
+
+      h1 {
+        font-size: 1.4rem;
+      }
+
+      /* The "existing SPA" half — a hand-rolled control, untouched. */
+      .legacy-btn {
+        appearance: none;
+        border: 1px solid #c3c9d5;
+        background: #f4f6fa;
+        border-radius: 6px;
+        padding: 0.5rem 1rem;
+        font: inherit;
+        cursor: pointer;
+      }
+
+      .row {
+        display: flex;
+        gap: 1rem;
+        align-items: center;
+        flex-wrap: wrap;
+        margin: 1.25rem 0;
+      }
+
+      .panel {
+        border: 1px solid #e2e6ee;
+        border-radius: 10px;
+        padding: 1.25rem;
+        margin: 1.5rem 0;
+      }
+
+      .muted {
+        color: #6b7280;
+        font-size: 0.9rem;
+      }
+    </style>
+  </head>
+
+  <body>
+    <h1>Web Awesome components inside a vanilla page</h1>
+    <p class="muted">
+      Framework-agnostic, no rewrite: the same custom elements work here, in the
+      existing SvelteKit SPA, or in plain HTML. The autoloader fetches each
+      component on first use.
+    </p>
+
+    <!-- AS-IS vs TO-BE, side by side, sharing one page ---------------------->
+    <div class="panel">
+      <strong>Coexistence demo</strong>
+      <div class="row">
+        <!-- AS-IS: hand-rolled native button (what the SPA has today). -->
+        <button class="legacy-btn" id="legacy">Hand-rolled button (AS-IS)</button>
+
+        <!-- TO-BE: one custom element, fully themed via CSS vars. -->
+        <wa-button variant="brand" id="open">Web Awesome button (TO-BE)</wa-button>
+      </div>
+      <p class="muted">
+        Both live on the same page and the same DOM. Migration is incremental —
+        replace one control at a time, no big-bang rewrite.
+      </p>
+    </div>
+
+    <!-- A form input + a dialog, the two other requested components ---------->
+    <div class="panel">
+      <wa-input
+        id="name"
+        label="Seu nome"
+        placeholder="ex.: Yuri"
+        help-text="A <wa-input> custom element — validation, sizing, theming built in."
+      ></wa-input>
+    </div>
+
+    <wa-dialog id="dialog" label="Olá do Web Awesome">
+      <p>
+        This <code>&lt;wa-dialog&gt;</code> is a single custom element. No modal
+        library, no focus-trap code, no portal wiring — the element handles it.
+      </p>
+      <span id="greeting"></span>
+      <wa-button slot="footer" variant="brand" data-close>Fechar</wa-button>
+    </wa-dialog>
+
+    <script type="module">
+      // Vanilla TS/JS wiring — no framework. Wait for the elements to be
+      // defined by the autoloader before driving them.
+      const dialog = document.getElementById("dialog");
+      const greeting = document.getElementById("greeting");
+      const nameInput = document.getElementById("name");
+
+      document.getElementById("open").addEventListener("click", () => {
+        const name = (nameInput.value || "").trim();
+        greeting.textContent = name ? `Bem-vindo, ${name}!` : "";
+        dialog.open = true;
+      });
+
+      // Both the legacy and the Web Awesome buttons can share handlers.
+      document.getElementById("legacy").addEventListener("click", () => {
+        dialog.open = true;
+      });
+
+      dialog.addEventListener("click", (e) => {
+        if (e.target.closest("[data-close]")) dialog.open = false;
+      });
+    </script>
+  </body>
+</html>
