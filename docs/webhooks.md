@@ -1,12 +1,12 @@
 # CO Outbound Webhooks
 
-CO emits signed HTTP POST events to registered endpoints. Use this to connect CO and quilombo events to n8n, Zapier, or any automation platform — without writing Rust code.
+CO emits signed HTTP POST events to registered endpoints. Use this to connect CO events to n8n, Zapier, or any automation platform — without writing Rust code.
 
 ## How it works
 
 ```
 Request handler
-  └── emit_event("quilombo.evento.criado", payload)
+  └── emit_event("app.evento.criado", payload)
         └── notifications table (pending)
               └── webhook_worker (background, polls every 5 s)
                     ├── claim row
@@ -19,7 +19,7 @@ Each delivery includes these headers:
 
 | Header | Value |
 |--------|-------|
-| `X-CO-Event` | event type, e.g. `quilombo.evento.criado` |
+| `X-CO-Event` | event type, e.g. `app.evento.criado` |
 | `X-CO-Delivery` | unique notification ID (UUID) |
 | `X-CO-Signature-256` | `sha256=<hmac_hex>` |
 | `Content-Type` | `application/json` |
@@ -32,12 +32,12 @@ work with minimal adaptation.
 
 | Event type | Trigger |
 |------------|---------|
-| `quilombo.evento.criado` | New event created |
-| `quilombo.missao.participou` | User joined a mission |
-| `quilombo.mensagem.criada` | New internal message sent |
-| `quilombo.usuario.cadastro` | New quilombo user registered |
-| `quilombo.usuario.login` | User logged in |
-| `quilombo.missao.criada` | New mission created |
+| `app.evento.criado` | New event created |
+| `app.missao.participou` | User joined a mission |
+| `app.mensagem.criada` | New internal message sent |
+| `app.usuario.cadastro` | New app user registered |
+| `app.usuario.login` | User logged in |
+| `app.missao.criada` | New mission created |
 | `co.universe.criado` | New universe created |
 | `co.entry.criado` | New entry created (opt-in; high volume) |
 | `co.usuario.cadastro` | New CO user registered |
@@ -49,9 +49,9 @@ When registering a webhook, the `events` field accepts wildcards:
 | Pattern | Matches |
 |---------|---------|
 | `*` | All events |
-| `quilombo.*` | All quilombo events |
+| `app.*` | All app events |
 | `co.*` | All CO platform events |
-| `quilombo.evento.criado` | Exact match only |
+| `app.evento.criado` | Exact match only |
 
 ## Admin API
 
@@ -65,7 +65,7 @@ Content-Type: application/json
 
 {
   "url": "https://n8n.example.com/webhook/co",
-  "events": ["quilombo.*"]
+  "events": ["app.*"]
 }
 ```
 
@@ -76,7 +76,7 @@ Response (201 Created) — **secret is shown only once**:
   "id": "abc123",
   "url": "https://n8n.example.com/webhook/co",
   "secret": "a8f3d...",
-  "events": ["quilombo.*"],
+  "events": ["app.*"],
   "enabled": true,
   "created_at": "2026-05-08T12:00:00Z"
 }
@@ -145,7 +145,7 @@ curl -X POST https://co.artelonga.com.br/api/v1/gestao/webhooks \
   -H "Content-Type: application/json" \
   -d '{
     "url": "https://n8n.example.com/webhook/co",
-    "events": ["quilombo.*"]
+    "events": ["app.*"]
   }'
 ```
 
@@ -180,9 +180,9 @@ Add a **Switch** node after signature validation, branching on `x-co-event`:
 
 | Condition | Downstream |
 |-----------|-----------|
-| `quilombo.evento.criado` | WhatsApp node |
-| `quilombo.mensagem.criada` | Email node |
-| `quilombo.missao.participou` | SMS node |
+| `app.evento.criado` | WhatsApp node |
+| `app.mensagem.criada` | Email node |
+| `app.missao.participou` | SMS node |
 
 ## Zapier integration
 

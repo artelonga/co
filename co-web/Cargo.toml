@@ -69,14 +69,6 @@ tracing-opentelemetry = "0.27"
 tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
 
 [[bin]]
-name = "migrate_quilombo"
-path = "src/bin/migrate_quilombo.rs"
-
-[[bin]]
-name = "import_quilombo"
-path = "src/bin/import_quilombo.rs"
-
-[[bin]]
 name = "split_db"
 path = "src/bin/split_db.rs"
 

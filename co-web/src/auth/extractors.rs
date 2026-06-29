@@ -681,7 +681,6 @@ mod capability_gate_tests {
             wae_endpoint: None,
             wae_api_key: None,
             cookie_domain: None,
-            quilombo_legacy_login: true,
             bypass_rate_limit: false,
         };
         let experiment = ExperimentStore::new(dir.path());

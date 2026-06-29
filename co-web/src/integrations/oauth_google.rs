@@ -322,18 +322,6 @@ async fn callback_handler(
     };
     let user = user.map_err(|e| AppError::Internal(format!("link google user: {e}")))?;
 
-    // CO-184 reverse bridge: ensure a quilombo identity exists too. Best-effort —
-    // a failure here doesn't block sign-in (user can still use CO routes).
-    {
-        let storage = state.core.storage.lock();
-        if let Err(e) = storage.ensure_quilombo_user_for_co(&user.id) {
-            tracing::warn!(
-                "CO-184 ensure_quilombo_user_for_co failed for {} (sign-in continues): {e}",
-                user.id
-            );
-        }
-    }
-
     // 5. Issue session cookie.
     let session_token = state
         .core

@@ -511,7 +511,6 @@ impl Storage {
         // co-dev and co-experience removed (CO-142 Phase C — deprecated).
         let system_keys = [
             "template",
-            "quilomboaraucaria",
             "yggdrasil",
             "dados",
             // Admin content universes (seeded by seed_admin_content_universes).
@@ -819,7 +818,7 @@ impl Storage {
         };
 
         // Find universes whose owner_id has no row in users — but skip the
-        // 'system' sentinel (template, quilomboaraucaria, yggdrasil, etc.)
+        // 'system' sentinel (template, yggdrasil, etc.)
         // AND skip anonymous-clone universes (key starts with `anon-` or
         // `u-`). Those should be deleted by `cleanup_anon_universes`, not
         // re-homed to the admin (otherwise the admin's sidebar fills up

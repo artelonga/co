@@ -168,7 +168,7 @@ mod tests {
 
     #[test]
     fn operator_is_substituted_everywhere_and_no_placeholder_leaks() {
-        let r = render("Quilombo Araucária");
+        let r = render("Coletivo Exemplo");
         // Every field that mentions the operator is substituted; the literal
         // placeholder never survives in any field.
         for field in [
@@ -187,9 +187,9 @@ mod tests {
             );
         }
         // The fields that reference the operator carry the substituted name.
-        assert!(r.agreement.contains("Quilombo Araucária"));
-        assert!(r.boundary.contains("Quilombo Araucária"));
-        assert!(r.how_it_works.contains("Quilombo Araucária"));
+        assert!(r.agreement.contains("Coletivo Exemplo"));
+        assert!(r.boundary.contains("Coletivo Exemplo"));
+        assert!(r.how_it_works.contains("Coletivo Exemplo"));
     }
 
     #[test]

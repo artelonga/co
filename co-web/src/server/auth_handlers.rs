@@ -287,16 +287,6 @@ pub(super) async fn verify_handler(
         604800,
     );
 
-    // CO-184 reverse bridge — best-effort.
-    {
-        let storage = lock_storage(&state);
-        if let Err(e) = storage.ensure_quilombo_user_for_co(&user_id) {
-            tracing::warn!(
-                "CO-184 ensure_quilombo_user_for_co failed for {user_id} (magic-link continues): {e}"
-            );
-        }
-    }
-
     // CO-465: give a fresh user their own private personal universe — best-effort,
     // must never block login. Idempotent (no-op if they already own one).
     if is_new_user {
@@ -382,7 +372,6 @@ pub(super) async fn me_handler(
 ) -> Result<Json<MeResponse>, AppError> {
     let storage = lock_storage(&state);
 
-    // Check board users table first, then fall back to quilombo users.
     if let Some(user) = storage.get_user_by_id(&user_id.0) {
         // CO-173: include per-universe metadata for the authenticated user.
         let universes = storage.list_universes_with_metadata_for_user(&user.id);
@@ -424,28 +413,6 @@ pub(super) async fn me_handler(
             lead_id,
             lead_status,
             lead_source,
-        }));
-    }
-
-    if let Some(u) = crate::quilombo_storage::obter_usuario_por_id(storage.conn(), &user_id.0) {
-        // CO-173: even when the principal is a quilombo user (no CO link yet),
-        // surface the universes list — typically empty for unlinked quilombo
-        // users, but a follow-up `linked_co_user_id` set will populate it.
-        let universes = storage.list_universes_with_metadata_for_user(&u.id);
-        return Ok(Json(MeResponse {
-            user_id: u.id,
-            email: String::new(),
-            display_name: if u.nome.is_empty() {
-                u.usuario.clone()
-            } else {
-                u.nome
-            },
-            tier: u.papel.to_string(),
-            universes,
-            dm_policy: None,
-            lead_id: None,
-            lead_status: None,
-            lead_source: None,
         }));
     }
 
@@ -634,17 +601,6 @@ pub(super) async fn password_login_handler(
         604800,
     );
 
-    // CO-184 reverse bridge — best-effort.
-    {
-        let storage = lock_storage(&state);
-        if let Err(e) = storage.ensure_quilombo_user_for_co(&user.id) {
-            tracing::warn!(
-                "CO-184 ensure_quilombo_user_for_co failed for {} (password-login continues): {e}",
-                user.id
-            );
-        }
-    }
-
     // CO-156: emit auth.login telemetry
     crate::telemetry::emit_crud_event(
         &state,
@@ -831,17 +787,6 @@ pub(super) async fn signup_handler(
         state.core.config.cookie_domain.as_deref(),
         604800,
     );
-
-    // CO-184 reverse bridge — best-effort.
-    {
-        let storage = lock_storage(&state);
-        if let Err(e) = storage.ensure_quilombo_user_for_co(&user.id) {
-            tracing::warn!(
-                "CO-184 ensure_quilombo_user_for_co failed for {} (signup continues): {e}",
-                user.id
-            );
-        }
-    }
 
     // --- telemetry ---
     crate::telemetry::emit_crud_event(

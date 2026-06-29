@@ -1,7 +1,7 @@
 //! CO-334: Keep-a-Changelog parser for cross-repo changelog aggregation.
 //!
 //! Parses the `## [N.N.N] — YYYY-MM-DD — optional theme` format used by all
-//! sister repos (ArteLonga, Quilombo, Yggdrasil, RFQ, CO).
+//! sister repos (ArteLonga, Yggdrasil, RFQ, CO).
 
 use chrono::NaiveDate;
 
@@ -135,7 +135,7 @@ fn strip_md_links(s: &str) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// Tests — 5 fixtures: ArteLonga, Quilombo, Yggdrasil, RFQ, CO
+// Tests — 5 fixtures: ArteLonga, sister repo, Yggdrasil, RFQ, CO
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
@@ -171,21 +171,24 @@ mod tests {
         assert_eq!(notes[1].version, "0.13.0");
     }
 
-    // ── Fixture 2: Quilombo (no theme, Portuguese body) ───────────────────────
+    // ── Fixture 2: sister repo (no theme, Portuguese body) ────────────────────
 
     #[test]
-    fn test_parse_quilombo() {
+    fn test_parse_sister_repo_no_theme() {
         let md = format!(
             "{}\n\n### Changed\n- fix(auth): session token expiry bug\n\n{}\n\n### Added\n- feat(events): new event type\n",
             h("0.12.7", "2026-05-24", None),
             h("0.12.6", "2026-05-20", None),
         );
-        let notes = parse_keep_a_changelog("quilomboaraucaria", &md);
+        let notes = parse_keep_a_changelog("exemplo", &md);
         assert_eq!(notes.len(), 2);
         assert_eq!(notes[0].version, "0.12.7");
-        assert_eq!(notes[0].repo, "quilomboaraucaria");
+        assert_eq!(notes[0].repo, "exemplo");
         assert_eq!(notes[0].date.to_string(), "2026-05-24");
-        assert!(notes[0].theme.is_none(), "Quilombo entries have no theme");
+        assert!(
+            notes[0].theme.is_none(),
+            "Sister-repo entries have no theme"
+        );
         assert!(notes[0].body_md.contains("session token expiry bug"));
     }
 

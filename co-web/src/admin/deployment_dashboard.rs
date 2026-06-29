@@ -360,10 +360,10 @@ mod tests {
     }
 
     #[test]
-    fn load_snapshots_returns_six_rows_when_db_empty() {
+    fn load_snapshots_returns_five_rows_when_db_empty() {
         let storage = make_test_storage();
         let rows = load_snapshots(&storage);
-        assert_eq!(rows.len(), 6);
+        assert_eq!(rows.len(), 5);
     }
 
     #[test]
@@ -379,7 +379,7 @@ mod tests {
             .unwrap();
 
         let rows = load_snapshots(&storage);
-        assert_eq!(rows.len(), 6);
+        assert_eq!(rows.len(), 5);
 
         let co = rows.iter().find(|r| r.unit == "co").unwrap();
         assert_eq!(co.version, "2.28.0");

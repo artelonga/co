@@ -29,14 +29,13 @@ fn test_config(dir: &std::path::Path) -> WebConfig {
         experiments: false,
         plugins_dir: "plugins".to_string(),
         game_db_path: None,
-        universo_dir: "quilomboaraucaria".to_string(),
+        universo_dir: "universo".to_string(),
         gestao_github_admins: vec![],
         universe_key: None,
         co_env: "prod".into(),
         wae_endpoint: None,
         wae_api_key: None,
         cookie_domain: None,
-        quilombo_legacy_login: true,
         bypass_rate_limit: false,
     }
 }
@@ -500,8 +499,8 @@ fn test_sanitize_origin_valid() {
         Some("co".to_string())
     );
     assert_eq!(
-        crate::auth::sanitize_origin(Some("quilombo-araucaria".to_string())),
-        Some("quilombo-araucaria".to_string())
+        crate::auth::sanitize_origin(Some("coletivo-exemplo".to_string())),
+        Some("coletivo-exemplo".to_string())
     );
     assert_eq!(
         crate::auth::sanitize_origin(Some("a".repeat(32))),

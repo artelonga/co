@@ -46,20 +46,6 @@ impl Storage {
             total += n;
         }
 
-        // Step 3 — co/data/universes/default/projects/QA/* → quilomboaraucaria/projects/QA/*.
-        let n = self.move_entries_strip_prefix(
-            "co",
-            "data/universes/default/projects/QA/%",
-            "quilomboaraucaria",
-            "data/universes/default/",
-        );
-        if n > 0 {
-            tracing::info!(
-                "CO-170 phase B: moved {n} entries co/projects/QA → quilomboaraucaria/projects/QA"
-            );
-            total += n;
-        }
-
         // Step 4 — drop empty `co` stubs that overlap with destination keys
         // before we move artelonga's real content into them.
         for key in ["API", "DS", "PLT", "CO"] {
@@ -320,29 +306,6 @@ impl Storage {
                 .unwrap_or(0);
             if deleted > 0 {
                 tracing::info!("CO-142: deleted deprecated universe '{key}'");
-            }
-        }
-    }
-
-    /// Phase D (CO-142): hard-delete stale quilombo variant rows that have no
-    /// documented purpose and accumulated via manual experiments. Idempotent.
-    pub fn delete_stale_quilombo_variants(&mut self) {
-        for key in [
-            "quilombo-blog",
-            "quilombo-blog-2",
-            "quilombo-blog-3",
-            "qa-dev",
-        ] {
-            let _ = self.conn.execute(
-                "DELETE FROM universe_members WHERE universe_key = ?1",
-                params![key],
-            );
-            let deleted = self
-                .conn
-                .execute("DELETE FROM universes WHERE key = ?1", params![key])
-                .unwrap_or(0);
-            if deleted > 0 {
-                tracing::info!("CO-142: deleted stale quilombo variant '{key}'");
             }
         }
     }

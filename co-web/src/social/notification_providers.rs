@@ -15,7 +15,7 @@
 //! - `CO_TPL_{PREFIX}_WHATSAPP`
 //!
 //! Where `{PREFIX}` is derived from the event type by uppercasing and replacing
-//! `.` with `_`. E.g. `quilombo.evento.criado` → `QUILOMBO_EVENTO_CRIADO`.
+//! `.` with `_`. E.g. `app.evento.criado` → `APP_EVENTO_CRIADO`.
 //!
 //! Substitution uses `{{key}}` placeholders resolved from the event payload.
 
@@ -105,7 +105,7 @@ pub fn template_from_env(
 // ---------------------------------------------------------------------------
 
 /// Derive the env var prefix from an event type.
-/// `quilombo.evento.criado` → `QUILOMBO_EVENTO_CRIADO`
+/// `app.evento.criado` → `APP_EVENTO_CRIADO`
 pub fn event_type_to_prefix(event_type: &str) -> String {
     event_type.to_uppercase().replace('.', "_")
 }
@@ -129,26 +129,14 @@ pub fn render_template(template: &str, payload: &Value) -> String {
 }
 
 /// Resolve a template for the given event type and channel slot.
-/// Checks env var first; falls back to built-in default if available.
+///
+/// Templates are env-driven and tenant-agnostic: a deployment registers
+/// per-event templates via `CO_TPL_<EVENT_PREFIX>_<SLOT>` env vars. There are
+/// no built-in tenant-specific defaults baked into the binary.
 pub fn get_template(event_type: &str, slot: &str) -> Option<String> {
     let prefix = event_type_to_prefix(event_type);
     let var_name = format!("CO_TPL_{prefix}_{slot}");
-    if let Some(val) = crate::infra::secrets::global().get(&var_name) {
-        return Some(val);
-    }
-    // Built-in defaults for known events
-    match (event_type, slot) {
-        ("quilombo.evento.criado", "EMAIL_SUBJECT") => {
-            Some("Novo evento no Quilombo: {{titulo}}".to_string())
-        }
-        ("quilombo.evento.criado", "EMAIL_BODY") => Some(
-            "Olá {{nome}},\n\nHá um novo evento: {{titulo}}.\n\nVeja em https://quilomboaraucaria.com.br".to_string()
-        ),
-        ("quilombo.evento.criado", "WHATSAPP") => {
-            Some("🌿 Novo evento no Quilombo!\n*{{titulo}}*".to_string())
-        }
-        _ => None,
-    }
+    crate::infra::secrets::global().get(&var_name)
 }
 
 // ---------------------------------------------------------------------------
@@ -167,7 +155,7 @@ impl ResendProvider {
     pub fn from_env() -> Option<Self> {
         let secrets = crate::infra::secrets::global();
         let api_key = secrets.get("RESEND_API_KEY")?;
-        let from = secrets.get_or("RESEND_FROM", "CO <noreply@quilomboaraucaria.com.br>");
+        let from = secrets.get_or("RESEND_FROM", "CO <noreply@co.artelonga.com.br>");
         Some(Self { api_key, from })
     }
 }
@@ -947,8 +935,8 @@ mod tests {
     #[test]
     fn event_type_to_prefix_converts_dots_to_underscores() {
         assert_eq!(
-            event_type_to_prefix("quilombo.evento.criado"),
-            "QUILOMBO_EVENTO_CRIADO"
+            event_type_to_prefix("app.evento.criado"),
+            "APP_EVENTO_CRIADO"
         );
         assert_eq!(
             event_type_to_prefix("co.universe.criado"),
@@ -957,26 +945,11 @@ mod tests {
     }
 
     #[test]
-    fn get_template_returns_default_for_evento_criado_email_subject() {
-        let tpl = get_template("quilombo.evento.criado", "EMAIL_SUBJECT");
-        assert!(tpl.is_some());
-        assert!(tpl.unwrap().contains("{{titulo}}"));
-    }
-
-    #[test]
-    fn get_template_returns_default_for_evento_criado_email_body() {
-        let tpl = get_template("quilombo.evento.criado", "EMAIL_BODY");
-        assert!(tpl.is_some());
-        let body = tpl.unwrap();
-        assert!(body.contains("{{nome}}"));
-        assert!(body.contains("{{titulo}}"));
-    }
-
-    #[test]
-    fn get_template_returns_default_for_evento_criado_whatsapp() {
-        let tpl = get_template("quilombo.evento.criado", "WHATSAPP");
-        assert!(tpl.is_some());
-        assert!(tpl.unwrap().contains("{{titulo}}"));
+    fn get_template_returns_none_without_env_override() {
+        let _env = crate::test_support::env_lock_blocking();
+        let _guard = EnvGuard::remove("CO_TPL_APP_EVENTO_CRIADO_EMAIL_SUBJECT");
+        let tpl = get_template("app.evento.criado", "EMAIL_SUBJECT");
+        assert!(tpl.is_none());
     }
 
     #[test]
@@ -1030,10 +1003,10 @@ mod tests {
     fn get_template_reads_env_var_override() {
         let _env = crate::test_support::env_lock_blocking();
         let _guard = EnvGuard::set(
-            "CO_TPL_QUILOMBO_EVENTO_CRIADO_EMAIL_SUBJECT",
+            "CO_TPL_APP_EVENTO_CRIADO_EMAIL_SUBJECT",
             "Override: {{titulo}}",
         );
-        let tpl = get_template("quilombo.evento.criado", "EMAIL_SUBJECT");
+        let tpl = get_template("app.evento.criado", "EMAIL_SUBJECT");
         assert_eq!(tpl.unwrap(), "Override: {{titulo}}");
     }
 
@@ -1137,12 +1110,21 @@ mod tests {
 
     #[test]
     fn render_full_email_template_for_evento() {
+        let _env = crate::test_support::env_lock_blocking();
+        let _subj = EnvGuard::set(
+            "CO_TPL_APP_EVENTO_CRIADO_EMAIL_SUBJECT",
+            "Novo evento: {{titulo}}",
+        );
+        let _body = EnvGuard::set(
+            "CO_TPL_APP_EVENTO_CRIADO_EMAIL_BODY",
+            "Olá {{nome}}, há um novo evento: {{titulo}}.",
+        );
         let payload = serde_json::json!({
             "titulo": "Festa Julina",
             "nome": "Yuri",
         });
-        let subject_tpl = get_template("quilombo.evento.criado", "EMAIL_SUBJECT").unwrap();
-        let body_tpl = get_template("quilombo.evento.criado", "EMAIL_BODY").unwrap();
+        let subject_tpl = get_template("app.evento.criado", "EMAIL_SUBJECT").unwrap();
+        let body_tpl = get_template("app.evento.criado", "EMAIL_BODY").unwrap();
         let subject = render_template(&subject_tpl, &payload);
         let body = render_template(&body_tpl, &payload);
         assert!(subject.contains("Festa Julina"));

@@ -32,7 +32,7 @@ use tracing_subscriber::EnvFilter;
     about = "CO-151 sync watcher (protobuf+zstd+WS)"
 )]
 struct Cli {
-    /// Universe key the watcher belongs to (e.g. `co`, `quilomboaraucaria`).
+    /// Universe key the watcher belongs to (e.g. `co`, `artelonga`).
     #[arg(long, env = "CO_UNIVERSE_KEY")]
     universe: String,
 

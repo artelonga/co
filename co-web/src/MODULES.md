@@ -229,12 +229,11 @@ sup.spawn(JobQueueWorker::new(state.clone()));
 
 | Directory | Universe | Purpose |
 |-----------|---------|---------|
-| `universes/quilombo/` | quilomboaraucaria.org | Processos, permissões, telemetria, storage |
 | `universes/game/` | Yggdrasil | Leaderboard models + routes |
 
-**Rule:** if a Rust module is specific to one universe (data models, custom routes, business logic that only applies to that universe's content), it belongs under `universes/<slug>/`. If it is reusable by any universe, it belongs in one of the platform directories above.
+**Rule:** if a Rust module is specific to one universe (data models, custom routes, business logic that only applies to that universe's content), it belongs under `universes/<slug>/`. If it is reusable by any universe, it belongs in one of the platform directories above. CO is the **generalist** software: tenant-specific backends do not ship in this repo — a tenant's real app lives in its own standalone repo, and its content is served generically via the universe/content APIs.
 
-**Re-exports:** `lib.rs` re-exports each universe sub-module at the crate root (e.g. `pub use universes::quilombo::quilombo_routes`) so existing `crate::quilombo_routes` call sites continue to compile unchanged.
+**Re-exports:** `lib.rs` re-exports each universe sub-module at the crate root so existing call sites continue to compile unchanged.
 
 **Future:** v2 will extract each `universes/<slug>/` into its own `co-universes-<slug>` crate (tracked as CO-N).
 

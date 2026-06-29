@@ -712,14 +712,13 @@ mod tests {
             experiments: false,
             plugins_dir: "plugins".to_string(),
             game_db_path: None,
-            universo_dir: "quilomboaraucaria".to_string(),
+            universo_dir: "universo".to_string(),
             gestao_github_admins: vec![],
             universe_key: None,
             co_env: "prod".into(),
             wae_endpoint: None,
             wae_api_key: None,
             cookie_domain: None,
-            quilombo_legacy_login: true,
             bypass_rate_limit: false,
         };
         let storage = Storage::new(&config.data_dir);
@@ -973,94 +972,5 @@ mod tests {
         );
         assert!(token_json["id_token"].is_string(), "must have id_token");
         assert_eq!(token_json["token_type"], "Bearer");
-    }
-
-    /// Quilombo legacy login returns 410 when disabled.
-    #[tokio::test]
-    async fn test_quilombo_legacy_login_disabled_returns_410() {
-        use crate::config::WebConfig;
-        use crate::experiment::ExperimentStore;
-        use crate::server::{
-            AppState, AppStateInner, CoreState, IndexState, IntegrationsState, RealtimeState,
-            build_router,
-        };
-        use crate::storage::Storage;
-        use std::sync::Mutex;
-
-        let dir = TempDir::new().unwrap();
-        let config = WebConfig {
-            port: 3000,
-            data_dir: dir.path().to_str().unwrap().to_string(),
-            static_dir: "co-web/static".to_string(),
-            default_variant: "a".to_string(),
-            experiments: false,
-            plugins_dir: "plugins".to_string(),
-            game_db_path: None,
-            universo_dir: "quilomboaraucaria".to_string(),
-            gestao_github_admins: vec![],
-            universe_key: None,
-            co_env: "prod".into(),
-            wae_endpoint: None,
-            wae_api_key: None,
-            cookie_domain: None,
-            quilombo_legacy_login: false, // <-- disabled
-            bypass_rate_limit: false,
-        };
-        let storage = Storage::new(&config.data_dir);
-        let experiment = ExperimentStore::new(&config.data_dir);
-        let auth_store = crate::auth::AuthStore::new(dir.path()).unwrap();
-        let mail: Arc<dyn co::MailProvider> = Arc::new(co::LogMailProvider);
-        let game_db_path = dir.path().join("game_test.db");
-        let game_storage = Arc::new(
-            game_core::storage::Storage::open(&game_db_path)
-                .expect("Failed to open test game storage"),
-        );
-        let state: AppState = AppState::new(AppStateInner {
-            core: Arc::new(CoreState::from_storage(storage, config, auth_store)),
-            realtime: Arc::new(RealtimeState {
-                doc_rooms: crate::ws::new_room_manager(),
-                sync_rooms: crate::sync_ws::new_sync_room_manager(),
-                chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
-                chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
-            }),
-            index: Arc::new(IndexState {
-                cache: crate::cache::CacheLayer::new(),
-                embeddings: std::sync::Arc::new(crate::embedding::EmbeddingService::disabled()),
-                embedding_tx: {
-                    let (tx, _) = crate::embedding_worker::channel();
-                    tx
-                },
-            }),
-            integrations: Arc::new(IntegrationsState {
-                mail,
-                geo: std::sync::Arc::new(crate::geo::GeoDb::disabled()),
-                plugin_registry: game_core::plugin::PluginRegistry::new(),
-                game_storage,
-                wae: crate::wae::WaeEmitter::new(None, None),
-                jwt_key: Arc::new(JwtKey::load_or_generate()),
-                rate_limiter: std::sync::Mutex::new(crate::rate_limit::InProcessRateLimiter::new()),
-                experiment: Mutex::new(experiment),
-                worker_supervisor: crate::infra::workers::InProcessExecutor::new_arc(),
-            }),
-        });
-        let app = build_router(state, None);
-
-        let resp = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/api/v1/quilombo/auth/login")
-                    .header("content-type", "application/json")
-                    .body(Body::from(r#"{"usuario":"anyone","senha":"anypassword"}"#))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(
-            resp.status(),
-            StatusCode::GONE,
-            "legacy quilombo login must return 410 when disabled"
-        );
     }
 }

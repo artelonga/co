@@ -262,7 +262,7 @@ struct RecoverQuery {
 }
 
 /// CO-172 hardening: `/recover?return_to=<url>` is checked against the
-/// safelist (`*.artelonga.com.br` + `quilomboaraucaria.com.br`) before the
+/// safelist (`*.artelonga.com.br`) before the
 /// SPA is served. Without this, a phishing email could send a victim to
 /// `co.artelonga.com.br/recover?return_to=https://evil.com` — the URL bar
 /// shows a trusted hostname, the user completes the reset, and the SPA
@@ -282,7 +282,7 @@ async fn serve_recover(
         return (
             StatusCode::BAD_REQUEST,
             "return_to host is not in the safelist; \
-             only *.artelonga.com.br and quilomboaraucaria.com.br are allowed",
+             only *.artelonga.com.br is allowed",
         )
             .into_response();
     }

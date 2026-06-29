@@ -380,18 +380,6 @@ async fn callback_handler(
     };
     let user = user.map_err(|e| AppError::Internal(format!("link github user: {e}")))?;
 
-    // CO-184 reverse bridge: ensure a quilombo identity exists too. Best-effort —
-    // a failure here doesn't block sign-in.
-    {
-        let storage = state.core.storage.lock();
-        if let Err(e) = storage.ensure_quilombo_user_for_co(&user.id) {
-            tracing::warn!(
-                "CO-184 ensure_quilombo_user_for_co failed for {} (sign-in continues): {e}",
-                user.id
-            );
-        }
-    }
-
     // 6. Issue session cookie.
     let session_token = state
         .core
@@ -467,10 +455,10 @@ mod tests {
             .timestamp() as u64;
         let claims = StateClaims {
             kind: "github_oauth_state".into(),
-            return_to: "https://quilomboaraucaria.org/x".into(),
+            return_to: "https://artelonga.com.br/x".into(),
             nonce: "abc123".into(),
             exp,
-            origin: Some("https://quilomboaraucaria.org".into()),
+            origin: Some("https://artelonga.com.br".into()),
         };
         let token = jsonwebtoken::encode(
             &Header::default(),
@@ -486,12 +474,9 @@ mod tests {
         .unwrap()
         .claims;
         assert_eq!(decoded.kind, "github_oauth_state");
-        assert_eq!(decoded.return_to, "https://quilomboaraucaria.org/x");
+        assert_eq!(decoded.return_to, "https://artelonga.com.br/x");
         assert_eq!(decoded.nonce, "abc123");
-        assert_eq!(
-            decoded.origin.as_deref(),
-            Some("https://quilomboaraucaria.org")
-        );
+        assert_eq!(decoded.origin.as_deref(), Some("https://artelonga.com.br"));
     }
 
     /// A state signed with one secret must NOT verify under a different secret.

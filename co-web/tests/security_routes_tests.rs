@@ -31,7 +31,7 @@ fn test_config(dir: &std::path::Path) -> WebConfig {
         experiments: true,
         plugins_dir: "plugins".to_string(),
         game_db_path: None,
-        universo_dir: "quilomboaraucaria".to_string(),
+        universo_dir: "universo".to_string(),
         // Non-empty admin list — so an authenticated non-admin would be
         // forbidden, and (crucially) an UNauthenticated request is rejected
         // before any admin check.
@@ -41,7 +41,6 @@ fn test_config(dir: &std::path::Path) -> WebConfig {
         wae_endpoint: None,
         wae_api_key: None,
         cookie_domain: None,
-        quilombo_legacy_login: true,
         bypass_rate_limit: false,
     }
 }

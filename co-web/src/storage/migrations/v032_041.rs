@@ -1,5 +1,5 @@
 use super::super::Storage;
-use super::super::schema::ensure_column;
+use super::super::schema::{ensure_column, table_exists};
 
 impl Storage {
     pub(super) fn migrate_v032_041(&mut self, current_version: i64) {
@@ -43,27 +43,36 @@ impl Storage {
         }
 
         if current_version < 33 {
-            // CO-166 (1.76.0): link quilombo accounts to CO main accounts.
-            ensure_column(&self.conn, "quilombo_usuarios", "linked_co_user_id", "TEXT")
-                .expect("migration v33: quilombo_usuarios.linked_co_user_id column");
+            // CO-166 (1.76.0): historically linked tenant accounts to CO accounts.
+            // CO-509: the tenant table is no longer created — no-op on a fresh DB,
+            // applied only on legacy DBs that still carry it.
+            if table_exists(&self.conn, "quilombo_usuarios") {
+                ensure_column(&self.conn, "quilombo_usuarios", "linked_co_user_id", "TEXT")
+                    .expect("migration v33: quilombo_usuarios.linked_co_user_id column");
+            }
             self.conn
                 .execute("INSERT INTO schema_version (version) VALUES (33)", [])
                 .expect("Failed to record migration v33");
         }
 
         if current_version < 34 {
-            // CO-167 (1.79.0): email for quilombo users — bridge to CO unified auth.
-            ensure_column(&self.conn, "quilombo_usuarios", "email", "TEXT")
-                .expect("migration v34: quilombo_usuarios.email");
-            ensure_column(&self.conn, "quilombo_usuarios", "linked_co_user_id", "TEXT")
-                .expect("migration v34: quilombo_usuarios.linked_co_user_id");
+            // CO-167 (1.79.0): email bridge for legacy tenant users.
+            // CO-509: no-op on a fresh DB (tenant table no longer created).
+            if table_exists(&self.conn, "quilombo_usuarios") {
+                ensure_column(&self.conn, "quilombo_usuarios", "email", "TEXT")
+                    .expect("migration v34: quilombo_usuarios.email");
+                ensure_column(&self.conn, "quilombo_usuarios", "linked_co_user_id", "TEXT")
+                    .expect("migration v34: quilombo_usuarios.linked_co_user_id");
+                self.conn
+                    .execute_batch(
+                        "CREATE UNIQUE INDEX IF NOT EXISTS idx_quilombo_usuarios_email
+                             ON quilombo_usuarios(email) WHERE email IS NOT NULL;",
+                    )
+                    .expect("migration v34: idx_quilombo_usuarios_email");
+            }
             self.conn
-                .execute_batch(
-                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_quilombo_usuarios_email
-                         ON quilombo_usuarios(email) WHERE email IS NOT NULL;
-                     INSERT INTO schema_version (version) VALUES (34);",
-                )
-                .expect("Failed to run migration v34");
+                .execute("INSERT INTO schema_version (version) VALUES (34)", [])
+                .expect("Failed to record migration v34");
         }
 
         if current_version < 35 {
@@ -102,8 +111,11 @@ impl Storage {
 
         if current_version < 36 {
             // CO-169 (1.81.0): direct notification provider adapters.
-            ensure_column(&self.conn, "quilombo_usuarios", "telefone", "TEXT")
-                .expect("migration v36: quilombo_usuarios.telefone");
+            // CO-509: tenant-table column is no-op on a fresh DB.
+            if table_exists(&self.conn, "quilombo_usuarios") {
+                ensure_column(&self.conn, "quilombo_usuarios", "telefone", "TEXT")
+                    .expect("migration v36: quilombo_usuarios.telefone");
+            }
             ensure_column(&self.conn, "notifications", "channel", "TEXT")
                 .expect("migration v36: notifications.channel");
             ensure_column(&self.conn, "notifications", "recipient", "TEXT")

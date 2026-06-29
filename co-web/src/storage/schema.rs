@@ -132,6 +132,23 @@ pub(crate) fn ensure_table(
     }
 }
 
+/// Returns `true` if a table with the given name exists.
+///
+/// CO-509: used to make historical, now-removed-tenant migrations no-op on a
+/// fresh DB (the tenant tables they alter are no longer created) while still
+/// applying on legacy DBs that already have those tables.
+pub(crate) fn table_exists(conn: &Connection, name: &str) -> bool {
+    conn.query_row(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1",
+        params![name],
+        |_| Ok(true),
+    )
+    .optional()
+    .ok()
+    .flatten()
+    .unwrap_or(false)
+}
+
 // ---------------------------------------------------------------------------
 // CO-165: Row-mapping helpers for recovery tables
 // ---------------------------------------------------------------------------

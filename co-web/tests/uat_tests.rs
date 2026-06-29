@@ -53,7 +53,6 @@ fn test_config(dir: &std::path::Path, is_uat: bool) -> WebConfig {
         wae_endpoint: None,
         wae_api_key: None,
         cookie_domain: None,
-        quilombo_legacy_login: true,
         bypass_rate_limit: false,
     }
 }
@@ -367,7 +366,6 @@ fn test_is_uat_config() {
         wae_endpoint: None,
         wae_api_key: None,
         cookie_domain: None,
-        quilombo_legacy_login: true,
         bypass_rate_limit: false,
     };
     assert!(uat_config.is_uat());

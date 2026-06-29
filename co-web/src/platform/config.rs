@@ -47,7 +47,7 @@ pub struct WebConfig {
     pub experiments: bool,
     pub plugins_dir: String,
     pub game_db_path: Option<String>,
-    /// Directory for the universo (quilombo) vault files.
+    /// Directory for the universo vault files.
     pub universo_dir: String,
     /// GitHub usernames allowed as gestão admins.
     pub gestao_github_admins: Vec<String>,
@@ -65,9 +65,6 @@ pub struct WebConfig {
     /// When absent, no Domain attribute is added (localhost-safe default).
     /// Set via `CO_COOKIE_DOMAIN` env var.
     pub cookie_domain: Option<String>,
-    /// CO-166: When false, `POST /api/v1/quilombo/auth/login` returns 410 Gone.
-    /// Default: true (legacy login enabled). Set via `CO_QUILOMBO_LEGACY_LOGIN=false`.
-    pub quilombo_legacy_login: bool,
     /// CO-208: when true AND `co_env == "test"`, the token-bucket rate-limit
     /// middleware passes every request through unconditionally. Set via
     /// `CO_BYPASS_RATE_LIMIT=1`. Has no effect outside `CO_ENV=test`.
@@ -146,7 +143,6 @@ mod tests {
             wae_endpoint: None,
             wae_api_key: None,
             cookie_domain: None,
-            quilombo_legacy_login: true,
             bypass_rate_limit: false,
         }
     }
@@ -257,10 +253,6 @@ impl From<Args> for WebConfig {
             wae_endpoint: secrets.get("WAE_ENDPOINT"),
             wae_api_key: secrets.get("WAE_API_KEY"),
             cookie_domain: secrets.get("CO_COOKIE_DOMAIN"),
-            quilombo_legacy_login: secrets
-                .get("CO_QUILOMBO_LEGACY_LOGIN")
-                .map(|v| v != "false")
-                .unwrap_or(true),
             bypass_rate_limit: secrets.get_bool("CO_BYPASS_RATE_LIMIT", false),
         }
     }

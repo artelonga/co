@@ -599,7 +599,6 @@ mod factory_swap_tests {
             wae_api_key: None,
             wae_endpoint: None,
             cookie_domain: None,
-            quilombo_legacy_login: true,
             bypass_rate_limit: false,
         };
         let storage = crate::storage::Storage::new(&config.data_dir);

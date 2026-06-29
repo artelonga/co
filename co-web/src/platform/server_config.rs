@@ -116,9 +116,9 @@ pub struct CoServerConfig {
     pub public_url: Option<String>,
     /// `CO_BASE_URL` — base URL for invitation links.
     pub base_url: String,
-    /// `CANONICAL_HOST` — canonical-host redirect target (quilombo).
+    /// `CANONICAL_HOST` — canonical-host redirect target.
     pub canonical_host: Option<String>,
-    /// `ALLOWED_ORIGINS` — comma-separated CORS origins (quilombo).
+    /// `ALLOWED_ORIGINS` — comma-separated CORS origins.
     pub allowed_origins: String,
     /// `CO_FEEDBACK_FORWARD_URL` — feedback webhook forward target.
     pub feedback_forward_url: Option<String>,
@@ -146,14 +146,6 @@ pub struct CoServerConfig {
     pub desktop_notify_enabled: bool,
     /// `CO_EMBEDDING_BOOT_SCAN` — opt-in boot embedding backfill. Default: off.
     pub embedding_boot_scan: bool,
-
-    // --- Quilombo universe paths -----------------------------------------
-    /// `QUILOMBO_DIR` — quilombo vault root. Default: `quilombo`.
-    pub quilombo_dir: String,
-    /// `QUILOMBO_RELATOS_DIR` — relatos subdir. Default: `relatos`.
-    pub quilombo_relatos_dir: String,
-    /// `QUILOMBO_PAGINAS_DIR` — jardim/paginas subdir. Default: `jardim`.
-    pub quilombo_paginas_dir: String,
 }
 
 impl CoServerConfig {
@@ -229,9 +221,8 @@ impl CoServerConfig {
                 "NOTIF_FROM_EMAIL",
                 "notificacoes@seguranca.artelonga.com.br",
             ),
-            // quilomboaraucaria.com.br is a dead domain (DNS does not resolve) and is
-            // not Resend-verified, so this channel's mail couldn't send. Default to the
-            // verified seguranca.artelonga.com.br domain (overridable via RESEND_FROM).
+            // Default to the verified seguranca.artelonga.com.br domain, which is
+            // Resend-verified so this channel's mail can send (overridable via RESEND_FROM).
             resend_from: secrets.get_or("RESEND_FROM", "CO <noreply@seguranca.artelonga.com.br>"),
             vapid_subject: secrets.get_or("VAPID_SUBJECT", "mailto:noreply@co.artelonga.com.br"),
             evolution_api_url: secrets.get_or("EVOLUTION_API_URL", "https://api.evolution-api.com"),
@@ -242,10 +233,6 @@ impl CoServerConfig {
 
             desktop_notify_enabled,
             embedding_boot_scan: secrets.get_bool("CO_EMBEDDING_BOOT_SCAN", false),
-
-            quilombo_dir: secrets.get_or("QUILOMBO_DIR", "quilombo"),
-            quilombo_relatos_dir: secrets.get_or("QUILOMBO_RELATOS_DIR", "relatos"),
-            quilombo_paginas_dir: secrets.get_or("QUILOMBO_PAGINAS_DIR", "jardim"),
         }
     }
 }

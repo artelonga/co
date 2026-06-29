@@ -43,7 +43,6 @@ impl ThemePreset {
             relic_preset(),
             relic_light_preset(),
             modern_preset(),
-            quilombo_preset(),
         ]
     }
 
@@ -56,7 +55,6 @@ impl ThemePreset {
             "relic" => Some(relic_preset()),
             "relic-light" => Some(relic_light_preset()),
             "modern" | "" => Some(modern_preset()),
-            "quilombo" => Some(quilombo_preset()),
             _ => None,
         }
     }
@@ -612,128 +610,6 @@ fn insert_relic_light_md3_tokens(t: &mut HashMap<String, String>) {
 // ---------------------------------------------------------------------------
 // Shared token helpers
 // ---------------------------------------------------------------------------
-
-/// Quilombo Araucária — earth-and-forest palette inspired by the quilombo-blog design system.
-///
-/// Primary: #2d4a22 (folha — forest green)
-/// Secondary: #8b6914 (terra — bronze)
-/// Background: #f5f0e8 (areia — sand)
-fn quilombo_preset() -> ThemePreset {
-    let mut p = ThemePreset::new("quilombo");
-    p.font_headline = Some("Playfair Display".into());
-    p.font_body = Some("Inter".into());
-    p.font_label = Some("Inter".into());
-    let t = &mut p.tokens;
-    t.insert("--bg".into(), "#f5f0e8".into());
-    t.insert("--bg-hover".into(), "#ede6d5".into());
-    t.insert("--sidebar-bg".into(), "#e8e0cc".into());
-    t.insert("--sidebar-hover".into(), "#ddd3b8".into());
-    t.insert("--sidebar-active".into(), "#2d4a22".into());
-    t.insert("--card-bg".into(), "#faf6ef".into());
-    t.insert("--border".into(), "#c8b48e".into());
-    t.insert("--text-primary".into(), "#1a2614".into());
-    t.insert("--text-secondary".into(), "#4a3a10".into());
-    t.insert("--text-muted".into(), "#8b6914".into());
-    t.insert("--accent".into(), "#2d4a22".into());
-    t.insert("--accent-hover".into(), "#1e3316".into());
-    t.insert("--accent-light".into(), "#c4dbb0".into());
-    t.insert("--danger".into(), "#ba1a1a".into());
-    t.insert("--danger-hover".into(), "#93000a".into());
-    t.insert("--font".into(), "'Playfair Display', Georgia, serif".into());
-    t.insert(
-        "--font-label".into(),
-        "'Inter', system-ui, sans-serif".into(),
-    );
-    t.insert(
-        "--font-mono".into(),
-        "'SF Mono', 'Cascadia Mono', Consolas, monospace".into(),
-    );
-    t.insert("--radius-sm".into(), "4px".into());
-    t.insert("--radius-md".into(), "8px".into());
-    t.insert("--radius-lg".into(), "12px".into());
-    t.insert("--shadow-sm".into(), "0 1px 3px rgba(45,74,34,0.08)".into());
-    t.insert(
-        "--shadow-md".into(),
-        "0 4px 12px rgba(45,74,34,0.12), 0 2px 4px rgba(45,74,34,0.06)".into(),
-    );
-    t.insert(
-        "--shadow-lg".into(),
-        "0 12px 40px rgba(45,74,34,0.16), 0 4px 8px rgba(45,74,34,0.08)".into(),
-    );
-    t.insert("--modal-overlay".into(), "rgba(26,38,20,0.50)".into());
-    t.insert("--modal-surface".into(), "#faf6ef".into());
-    t.insert("--form-input-bg".into(), "transparent".into());
-    t.insert("--form-input-border".into(), "1px solid #c8b48e".into());
-    t.insert(
-        "--form-input-border-focus".into(),
-        "1px solid #2d4a22".into(),
-    );
-    t.insert("--form-input-radius".into(), "4px".into());
-    t.insert("--form-input-padding".into(), "8px 10px".into());
-    // Status tokens — earth-toned
-    t.insert("--status-todo".into(), "#8b6914".into());
-    t.insert("--status-in_progress".into(), "#2d4a22".into());
-    t.insert("--status-in_review".into(), "#7a5c00".into());
-    t.insert("--status-done".into(), "#1e5c1e".into());
-    t.insert("--status-todo-bg".into(), "#f5ead8".into());
-    t.insert("--status-in_progress-bg".into(), "#d8ead0".into());
-    t.insert("--status-in_review-bg".into(), "#f5f0d0".into());
-    t.insert("--status-done-bg".into(), "#c8e8c0".into());
-    t.insert("--status-todo-text".into(), "#6b4e0a".into());
-    t.insert("--status-in_progress-text".into(), "#1e3316".into());
-    t.insert("--status-in_review-text".into(), "#5a4000".into());
-    t.insert("--status-done-text".into(), "#154015".into());
-    insert_default_priority_tokens(t);
-    insert_quilombo_md3_tokens(t);
-    p
-}
-
-/// MD3 token set for the Quilombo Araucária theme (forest green + bronze palette).
-fn insert_quilombo_md3_tokens(t: &mut HashMap<String, String>) {
-    t.insert("--md-primary".into(), "#2d4a22".into());
-    t.insert("--md-primary-container".into(), "#4a7a38".into());
-    t.insert("--md-on-primary".into(), "#ffffff".into());
-    t.insert("--md-on-primary-container".into(), "#c4dbb0".into());
-    t.insert("--md-primary-fixed".into(), "#c4dbb0".into());
-    t.insert("--md-primary-fixed-dim".into(), "#8ab878".into());
-    t.insert("--md-on-primary-fixed".into(), "#0e1f0a".into());
-    t.insert("--md-on-primary-fixed-variant".into(), "#1e3316".into());
-    t.insert("--md-secondary".into(), "#8b6914".into());
-    t.insert("--md-secondary-container".into(), "#c8a040".into());
-    t.insert("--md-on-secondary".into(), "#ffffff".into());
-    t.insert("--md-on-secondary-container".into(), "#4a3a0a".into());
-    t.insert("--md-secondary-fixed".into(), "#f5e0a0".into());
-    t.insert("--md-secondary-fixed-dim".into(), "#c8b060".into());
-    t.insert("--md-on-secondary-fixed".into(), "#2e2000".into());
-    t.insert("--md-on-secondary-fixed-variant".into(), "#6b4e0a".into());
-    t.insert("--md-tertiary".into(), "#5a7040".into());
-    t.insert("--md-tertiary-container".into(), "#8aaa60".into());
-    t.insert("--md-on-tertiary".into(), "#ffffff".into());
-    t.insert("--md-on-tertiary-container".into(), "#283818".into());
-    t.insert("--md-surface".into(), "#f5f0e8".into());
-    t.insert("--md-surface-dim".into(), "#d8d0c0".into());
-    t.insert("--md-surface-bright".into(), "#faf6ef".into());
-    t.insert("--md-surface-container-lowest".into(), "#ffffff".into());
-    t.insert("--md-surface-container-low".into(), "#f0e8d8".into());
-    t.insert("--md-surface-container".into(), "#ede6d5".into());
-    t.insert("--md-surface-container-high".into(), "#e8e0cc".into());
-    t.insert("--md-surface-container-highest".into(), "#e0d8c0".into());
-    t.insert("--md-surface-variant".into(), "#e0d8c0".into());
-    t.insert("--md-surface-tint".into(), "#2d4a22".into());
-    t.insert("--md-on-surface".into(), "#1a2614".into());
-    t.insert("--md-on-surface-variant".into(), "#4a3a10".into());
-    t.insert("--md-outline".into(), "#8b6914".into());
-    t.insert("--md-outline-variant".into(), "#c8b48e".into());
-    t.insert("--md-error".into(), "#ba1a1a".into());
-    t.insert("--md-error-container".into(), "#ffdad6".into());
-    t.insert("--md-on-error".into(), "#ffffff".into());
-    t.insert("--md-on-error-container".into(), "#93000a".into());
-    t.insert("--md-background".into(), "#f5f0e8".into());
-    t.insert("--md-on-background".into(), "#1a2614".into());
-    t.insert("--md-inverse-surface".into(), "#2a3820".into());
-    t.insert("--md-inverse-on-surface".into(), "#f0e8d8".into());
-    t.insert("--md-inverse-primary".into(), "#8ab878".into());
-}
 
 fn insert_default_status_tokens(t: &mut HashMap<String, String>) {
     t.insert("--status-todo".into(), "#94a3b8".into());
