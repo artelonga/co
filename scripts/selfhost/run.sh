@@ -96,6 +96,16 @@ echo "  host:   $BIND_HOST"
 echo "  port:   $PORT"
 echo "  env:    $CO_ENV"
 
+# ── Disk pre-flight (CO-537 / CO-446) ─────────────────────────────────────────
+# A near-full data volume crashes co-web on the next migration write (CO-446).
+# Block boot at >85% full unless explicitly overridden (CO_SKIP_DISK_GATE=1).
+if [ "${CO_SKIP_DISK_GATE:-0}" != "1" ] && [ -x "$SCRIPT_DIR/../disk-gate-selfhost.sh" ]; then
+  "$SCRIPT_DIR/../disk-gate-selfhost.sh" "$DATA" || {
+    echo "run.sh: disk gate blocked boot (free space, or set CO_SKIP_DISK_GATE=1 to override)." >&2
+    exit 1
+  }
+fi
+
 # ── Build ─────────────────────────────────────────────────────────────────────
 BIN="$REPO_ROOT/target/release/co-web"
 if [ "$NO_BUILD" -eq 0 ]; then
