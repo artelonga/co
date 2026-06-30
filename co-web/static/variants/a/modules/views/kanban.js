@@ -34,7 +34,9 @@ function setMobileActiveColumn(key) {
     localStorage.setItem(MOBILE_COL_KEY, key);
 }
 
-export function renderKanban() {
+// CO-556: refetch (default true) gates the fire-and-forget agent-session footer
+// network load, so a pure language re-render (refetch:false) makes no fetch.
+export function renderKanban({ refetch = true } = {}) {
     // Detach previous drag listener before rebuilding the DOM.
     if (_dragCleanup) { _dragCleanup(); _dragCleanup = null; }
 
@@ -77,8 +79,9 @@ export function renderKanban() {
     setupDragDrop();
     setupCardClicks();
     setupSubtreeToggles();
-    // CO-275: lazy-load agent session footers; fire-and-forget
-    loadAgentSessionFooters();
+    // CO-275: lazy-load agent session footers; fire-and-forget.
+    // CO-556: skipped on a pure language re-render so the toggle stays network-free.
+    if (refetch) loadAgentSessionFooters();
 }
 
 function setupSegmentedControl() {
