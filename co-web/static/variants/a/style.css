@@ -3884,23 +3884,51 @@ body.co-single-universe-mode .hamburger-btn {
     background: var(--accent-light);
 }
 
+/* Segmented PT | EN language toggle (CO-555): both languages always visible,
+   the active one highlighted via <html lang> (set by setLang()). */
 .lang-toggle {
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    color: rgba(241, 245, 249, 0.4);
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 2px;
     background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 6px;
-    padding: 3px 8px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 999px;
     cursor: pointer;
-    transition: all 0.15s;
+    line-height: 1;
+    transition: border-color 0.15s, background 0.15s;
+}
+
+.lang-toggle .lang-seg {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    color: rgba(241, 245, 249, 0.45);
+    padding: 3px 9px;
+    border-radius: 999px;
+    transition: background 0.15s, color 0.15s;
 }
 
 .lang-toggle:hover {
-    color: rgba(241, 245, 249, 0.9);
     border-color: rgba(255, 255, 255, 0.25);
     background: rgba(255, 255, 255, 0.08);
+}
+
+.lang-toggle:hover .lang-seg {
+    color: rgba(241, 245, 249, 0.7);
+}
+
+/* Active language: html[lang] is "pt-BR" or "en" (kept in sync by setLang()). */
+html[lang^="pt"] .lang-toggle .lang-seg-pt,
+html[lang="en"] .lang-toggle .lang-seg-en {
+    background: var(--accent);
+    color: #fff;
+}
+
+html[lang^="pt"] .lang-toggle:hover .lang-seg-pt,
+html[lang="en"] .lang-toggle:hover .lang-seg-en {
+    color: #fff;
 }
 
 /* ===== Named Palettes ===== */

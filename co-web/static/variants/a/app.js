@@ -970,7 +970,16 @@ async function init() {
     window.setLang(window.currentLang);
 
     const btnHeaderLang = document.getElementById('btn-header-lang');
-    if (btnHeaderLang) btnHeaderLang.addEventListener('click', () => { window.setLang(window.currentLang === 'pt' ? 'en' : 'pt'); render(); });
+    if (btnHeaderLang) btnHeaderLang.addEventListener('click', (e) => {
+        // Segmented PT | EN control: a click on a segment selects that language;
+        // a click elsewhere on the pill toggles. Active segment is highlighted by
+        // CSS via <html lang>, which window.setLang() keeps in sync.
+        const seg = e.target.closest('[data-lang]');
+        const next = seg ? seg.dataset.lang : (window.currentLang === 'pt' ? 'en' : 'pt');
+        if (next === window.currentLang) return;
+        window.setLang(next);
+        render();
+    });
 
     renderHeaderUserArea(null);
     initTimelineStart();

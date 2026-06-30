@@ -140,7 +140,10 @@
                         </button>
                         <div id="notifications-dropdown" class="notifications-dropdown hidden"></div>
                     </div>
-                    <button class="btn-text-sm lang-toggle" id="btn-header-lang" data-i18n="lang.switch">English</button>
+                    <button type="button" class="lang-toggle" id="btn-header-lang" aria-label="Trocar idioma / Switch language" title="Português / English">
+                        <span class="lang-seg lang-seg-pt" data-lang="pt" aria-hidden="true">PT</span>
+                        <span class="lang-seg lang-seg-en" data-lang="en" aria-hidden="true">EN</span>
+                    </button>
                     <div id="header-user-area" class="header-user-area">
                         <button class="btn btn-ghost header-entrar" id="btn-header-entrar" data-i18n="action.login">Entrar</button>
                     </div>
