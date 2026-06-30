@@ -182,6 +182,8 @@ const SPA_PATHS = new Set([
   '/yggdrasil/{game}', '/notifications', '/recover',
   '/invitations/{token}', '/{slug}/assets', '/{slug}/graph',
   '/linhadotempo', '/timeline',
+  // CO-557: English content-mirror page routes.
+  '/en', '/en/', '/en/{slug}',
 ]);
 
 // Catalog paths whose code routes resolve via "/" in a nested router.

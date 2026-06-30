@@ -12,6 +12,8 @@ pub fn run_startup_seeds(config: &WebConfig) {
     storage.migrate_template_project_rename();
     storage.seed_template_universe();
     storage.reseed_template_content_pages();
+    // CO-555: ingest the English mirror of the intro pages (en/<slug>).
+    storage.reseed_template_en_pages();
     // Force theme preset back to 'modern' so the public landing page
     // always renders with the intended default — old migrations could
     // have left it on 'scholarly-light'.

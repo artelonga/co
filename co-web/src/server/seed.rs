@@ -11,11 +11,11 @@ use crate::storage::schema::{
 
 use crate::storage::{
     SEED_CO_CHANGELOG_MD, SEED_CO_INDEX_MD, SEED_CO_PLATAFORMA_MD, SEED_CO_PUBLIC_INDEX_MD,
-    SEED_CONTA_MD, SEED_DADOS_RASTREADOS_MD, SEED_GUIA_MD, SEED_INFRA_CO_MD, SEED_INFRA_MD,
-    SEED_LICENSA_MD, SEED_LINHAS_DO_TEMPO_MD, SEED_PRIVACIDADE_MD, SEED_RENDERERS_MD,
-    SEED_SEGURANCA_CENARIOS_MD, SEED_SEGURANCA_CRIPTO_MD, SEED_SEGURANCA_DEPS_MD,
-    SEED_SEGURANCA_MD, SEED_SEGURANCA_VAPID_MD, SEED_SOBRE_MD, SEED_TEMPLATE_INDEX_MD,
-    SEED_TERMOS_MD, SEED_TX_LOG_MD,
+    SEED_CONTA_MD, SEED_DADOS_RASTREADOS_MD, SEED_EN_INDEX_MD, SEED_EN_SOBRE_MD, SEED_GUIA_MD,
+    SEED_INFRA_CO_MD, SEED_INFRA_MD, SEED_LICENSA_MD, SEED_LINHAS_DO_TEMPO_MD, SEED_PRIVACIDADE_MD,
+    SEED_RENDERERS_MD, SEED_SEGURANCA_CENARIOS_MD, SEED_SEGURANCA_CRIPTO_MD,
+    SEED_SEGURANCA_DEPS_MD, SEED_SEGURANCA_MD, SEED_SEGURANCA_VAPID_MD, SEED_SOBRE_MD,
+    SEED_TEMPLATE_INDEX_MD, SEED_TERMOS_MD, SEED_TX_LOG_MD,
 };
 
 impl Storage {
@@ -363,6 +363,52 @@ impl Storage {
                 tracing::warn!("Failed to upsert {path} page: {e}");
             }
         }
+    }
+
+    /// CO-555: ingest the English mirror of the template intro pages as
+    /// language-tagged entries (`language: en`, path `en/<slug>`).
+    ///
+    /// The mirror markdown is produced by the modular translator
+    /// (`scripts/i18n/translate.py --to en`) and embedded via `include_str!`.
+    /// Ingest goes through the vault + entry repository (NOT raw SQLite) and is
+    /// idempotent — a re-run with an unchanged mirror is a no-op. These are NEW
+    /// paths (`en/…`), so the pt reseed above never touches them.
+    ///
+    /// Runs on every boot, mirroring `reseed_template_content_pages`.
+    pub fn reseed_template_en_pages(&mut self) {
+        if !self.template_exists() {
+            return; // first-boot path seeds the template first
+        }
+        let universe_root = self.universe_root("template");
+        let template_uc = self.universe_pool.get_or_open("template");
+        let repo = crate::repository::SqliteEntryRepository::new(template_uc);
+
+        // (relative slug path, markdown) — the translator keeps slugs, so the pt
+        // `/sobre` page maps to the `en/sobre.md` entry → `/en/sobre`.
+        let pages = [
+            ("index.md".to_string(), SEED_EN_INDEX_MD.to_string()),
+            ("sobre.md".to_string(), SEED_EN_SOBRE_MD.to_string()),
+        ];
+        let report = crate::translate::ingest::ingest_language_pages(
+            &repo,
+            &universe_root,
+            "template",
+            "en",
+            &pages,
+        );
+        if !report.skipped.is_empty() {
+            tracing::warn!(
+                "CO-555: en mirror ingest skipped {} page(s): {:?}",
+                report.skipped.len(),
+                report.skipped
+            );
+        }
+        tracing::debug!(
+            "CO-555: en mirror ingest — created={} updated={} unchanged={}",
+            report.created,
+            report.updated,
+            report.unchanged
+        );
     }
 
     /// Reseed the transparency content cluster (security, license,
