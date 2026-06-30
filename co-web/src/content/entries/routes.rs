@@ -2629,6 +2629,21 @@ fn key_from_path(path: &str) -> String {
         .to_string()
 }
 
+/// CO-542: sort dev-task keys numerically by the trailing integer of a `CO-N`
+/// style key (so `CO-2` < `CO-10` < `CO-100`), not lexically (which produced
+/// `CO-1, CO-10, CO-100, CO-11, …`). Keys without a numeric tail sort last,
+/// ordered by their string form for a stable result.
+fn dev_task_sort_key(key: &str) -> (u64, String) {
+    let num = key
+        .rsplit('-')
+        .next()
+        .and_then(|tail| tail.parse::<u64>().ok());
+    match num {
+        Some(n) => (n, String::new()),
+        None => (u64::MAX, key.to_string()),
+    }
+}
+
 /// Query for `GET /{slug}/timeline` — the CO-396 project-timeline lens.
 #[derive(Debug, Deserialize)]
 pub struct ProjectTimelineQuery {
@@ -2683,7 +2698,7 @@ pub async fn list_dev_tasks(
 
     const DEV_TASK_TYPES: &[&str] = &["user-story", "task", "epic"];
 
-    let tasks: Vec<DevTask> = all_entries
+    let mut tasks: Vec<DevTask> = all_entries
         .into_iter()
         .filter(|e| DEV_TASK_TYPES.contains(&e.entry_type.as_str()))
         .filter_map(|e| {
@@ -2721,6 +2736,11 @@ pub async fn list_dev_tasks(
             })
         })
         .collect();
+
+    // CO-542: order by the numeric tail of the CO-N key so the board/table is
+    // numerically sorted (CO-2, CO-10, CO-100) instead of the lexical order the
+    // underlying `ORDER BY path ASC` query yields.
+    tasks.sort_by(|a, b| dev_task_sort_key(&a.key).cmp(&dev_task_sort_key(&b.key)));
 
     let total = tasks.len();
     let mut resp = Json(DevTasksResponse { tasks, total }).into_response();
