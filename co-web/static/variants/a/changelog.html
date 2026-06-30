@@ -16,7 +16,12 @@ body{
   background:var(--bg,#0f172a);
   color:var(--text,#e2e8f0);
   font:14px/1.6 system-ui,sans-serif;
+  /* CO-541: override global style.css html,body{height:100%}+body{overflow:hidden}
+     which locked this standalone page to the viewport (content below the fold
+     unreachable). Allow the page to grow and scroll vertically. */
+  height:auto;
   min-height:100vh;
+  overflow-y:auto;
 }
 a{color:var(--accent,#7c6fcd);text-decoration:none}
 a:hover{text-decoration:underline}
