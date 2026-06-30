@@ -32,6 +32,7 @@ import { renderWorkspace, injectWorkspaceCallbacks } from './modules/views/works
 import { renderScrum, refreshScrumManifest, scrumEnabled, injectScrumCallbacks } from './modules/views/scrum.js';
 import {
     renderConteudo, openZoomModal, injectConteudoCallbacks, injectOpenContentEditor,
+    retranslateConteudoDetail,
 } from './modules/views/conteudo.js';
 import {
     openTaskModal, closeModal, loadEditorBundle,
@@ -848,7 +849,18 @@ function bindStaticEvents() {
     // here we rebuild the JS-built i18n constants and re-render the current view
     // with refetch:false so no apiFetch fires (a burst of requests was tripping the
     // server rate limiter and stacking "rate limit" error popups on every toggle).
-    document.addEventListener('co:langchange', () => { rebuildI18nConstants(); render({ refetch: false }); });
+    document.addEventListener('co:langchange', (e) => {
+        rebuildI18nConstants();
+        render({ refetch: false });
+        // CO-555: render({refetch:false}) deliberately SKIPS renderConteudo so the
+        // 6-entry fan-out (CO-556 rate-limit burst) never fires — but that left the
+        // Conteúdo body in the old language. Re-render just the current entry via a
+        // SINGLE fetch of its language twin (en/<slug> ↔ base). At most one /api/
+        // entry request per toggle; missing twin keeps the current language silently.
+        if (state.view === 'conteudo') {
+            retranslateConteudoDetail((e.detail && e.detail.lang) || window.currentLang);
+        }
+    });
 
     // CO-358: header overflow menu — visible at ≤640px
     setupHeaderOverflowMenu();

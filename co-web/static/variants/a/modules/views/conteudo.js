@@ -532,8 +532,19 @@ function createDetailController(container, initialEntry, deps) {
         renderRead();
     }
 
+    // CO-555: swap the displayed entry to its language twin without persisting
+    // the selection. A language toggle re-renders the body in the target
+    // language, but the remembered selection key must keep pointing at the
+    // user's actual pick (the base/pt path), not the transient en/ mirror.
+    function setLangTwin(entry) {
+        if (editing) teardownEditor();
+        editing = false;
+        current = entry;
+        renderRead();
+    }
+
     renderRead();
-    return { select, enterEdit, getCurrent: () => current };
+    return { select, setLangTwin, enterEdit, getCurrent: () => current };
 }
 
 export async function openZoomModal(entry, startInEditMode) {
@@ -1556,6 +1567,53 @@ export async function renderConteudo() {
             }
         });
     }
+}
+
+// CO-555: re-render ONLY the currently displayed Conteúdo entry in the target
+// language, using a SINGLE entry fetch of its language twin — never the 6-entry
+// renderConteudo() fan-out (that burst trips the rate limiter; CO-556).
+//
+// CO-555 ingest mirrors each page at `en/<slug>` (e.g. `index.md` ↔ `en/index.md`).
+// Switching to EN fetches the `en/` twin; switching to PT strips the `en/` prefix.
+// If the twin doesn't exist (404) the current content is kept gracefully — no
+// error popup. At most ONE /api/ entry request is issued per call, and none at
+// all when the displayed entry is already in the target language.
+export async function retranslateConteudoDetail(targetLang) {
+    const content = document.querySelector('#content');
+    if (!content || state.view !== 'conteudo') return;
+    const ctrl = content._detailController;
+    if (!ctrl || typeof ctrl.getCurrent !== 'function' || typeof ctrl.setLangTwin !== 'function') return;
+    const cur = ctrl.getCurrent();
+    if (!cur) return;
+
+    const curPath = cur.path || '';
+    const EN_PREFIX = 'en/';
+    const isEnPath = curPath === 'en' || curPath.startsWith(EN_PREFIX);
+    let twinPath;
+    if (targetLang === 'en') {
+        twinPath = isEnPath ? curPath : EN_PREFIX + curPath;
+    } else {
+        twinPath = isEnPath ? curPath.slice(EN_PREFIX.length) : curPath;
+    }
+    // Already displaying the target language → no fetch, no work.
+    if (!twinPath || twinPath === curPath) return;
+
+    const slug = state.currentUniverseSlug;
+    if (!slug) return;
+    const encoded = twinPath.split('/').map(encodeURIComponent).join('/');
+
+    // Raw fetch (not apiFetch) so a missing twin (404) is silent — apiFetch
+    // would surface a "Request error" toast, which we explicitly don't want.
+    let twin = null;
+    try {
+        const r = await window.fetch(
+            `/api/v1/universes/${encodeURIComponent(slug)}/entries/${encoded}`,
+            { credentials: 'same-origin' }
+        );
+        if (r.ok) twin = await r.json();
+    } catch (_) { /* network blip → keep current language gracefully */ }
+
+    if (twin && twin.path) ctrl.setLangTwin(twin);
 }
 
 // Callback for content editor (injected from app.js)
