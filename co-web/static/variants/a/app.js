@@ -32,6 +32,7 @@ import { renderWorkspace, injectWorkspaceCallbacks } from './modules/views/works
 import { renderScrum, refreshScrumManifest, scrumEnabled, injectScrumCallbacks } from './modules/views/scrum.js';
 import {
     renderConteudo, openZoomModal, injectConteudoCallbacks, injectOpenContentEditor,
+    retranslateConteudoDetail,
 } from './modules/views/conteudo.js';
 import {
     openTaskModal, closeModal, loadEditorBundle,
@@ -50,7 +51,7 @@ import { setupOnboarding, setupCriarModal, openCriarModal, injectOnboardingCallb
 import { bootYggdrasil, injectYggdrasilCallbacks } from './modules/yggdrasil.js';
 import {
     bootAppForUniverse, renderUniverseHome, bootApp as _bootApp,
-    injectBootCallbacks,
+    injectBootCallbacks, retranslateUniverseHome,
 } from './modules/boot.js';
 import {
     setupInvitationsPage, setupInvitationsPanel,
@@ -564,35 +565,44 @@ function switchZoom(zoom) {
     renderContent();
 }
 
-function renderContent() {
+// CO-556: with refetch:false (a pure language re-render) views that fetch on
+// entry (conteudo, universe-home, calendar, gantt, dashboard, changelog,
+// workspace, scrum) are skipped — their chrome was already retranslated by
+// setLang()'s [data-i18n] DOM swap. Views that render purely from cached state
+// (kanban, table, timeline) are re-rendered so their JS-built strings (e.g.
+// kanban column labels) retranslate, with no network call.
+function renderContent({ refetch = true } = {}) {
     if (state.loading) return;
-    if (state.view === 'conteudo') { renderConteudo(); return; }
+    if (state.view === 'conteudo') { if (refetch) renderConteudo(); return; }
     if (state.view.startsWith('gantt:')) {
         const viewName = state.view.slice(6);
         const viewDef = state.universeManifest && (state.universeManifest.views || []).find(v => v.type === 'gantt' && v.name === viewName);
-        if (viewDef) { renderGantt(viewDef); return; }
+        if (viewDef) { if (refetch) renderGantt(viewDef); return; }
     }
     const manifestHasCalendar = (state.universeManifest?.content_types || []).some(ct => ct.presentation?.calendar?.date_field);
-    if (state.view === 'calendar' && manifestHasCalendar) { renderCalendar(); return; }
-    if (state.view === 'timeline' && manifestHasCalendar) { renderEventsTimeline(); return; }
-    if (!state.currentProject) { renderUniverseHome(); return; }
-    if (state.view === 'kanban') renderKanban();
-    else if (state.view === 'calendar') renderCalendar();
+    if (state.view === 'calendar' && manifestHasCalendar) { if (refetch) renderCalendar(); return; }
+    if (state.view === 'timeline' && manifestHasCalendar) { if (refetch) renderEventsTimeline(); return; }
+    if (!state.currentProject) { if (refetch) renderUniverseHome(); return; }
+    if (state.view === 'kanban') renderKanban({ refetch });
+    else if (state.view === 'calendar') { if (refetch) renderCalendar(); }
     else if (state.view === 'table') renderTable();
     else if (state.view === 'timeline') renderTimeline();
-    else if (state.view === 'dashboard') renderDashboard();
-    else if (state.view === 'changelog') renderChangelog();
-    else if (state.view === 'workspace') renderWorkspace();
-    else if (state.view === 'scrum') renderScrum();
+    else if (state.view === 'dashboard') { if (refetch) renderDashboard(); }
+    else if (state.view === 'changelog') { if (refetch) renderChangelog(); }
+    else if (state.view === 'workspace') { if (refetch) renderWorkspace(); }
+    else if (state.view === 'scrum') { if (refetch) renderScrum(); }
 }
 
-function render() {
+// CO-556: `refetch` (default true) lets a pure language re-render reuse cached
+// state. When false, network-backed content renders are skipped so a language
+// toggle makes ZERO network calls.
+function render({ refetch = true } = {}) {
     renderSidebar();
     renderHeader();
     renderBreadcrumbs();
     renderMiniCalendar();
-    renderContent();
-    updateScrumTab(); // CO-368: fire-and-forget; slug-guarded so it fetches once per universe
+    renderContent({ refetch });
+    if (refetch) updateScrumTab(); // CO-368: fire-and-forget; slug-guarded so it fetches once per universe
 }
 
 // ===== Navigation =====
@@ -834,7 +844,30 @@ function bindStaticEvents() {
         }
     });
 
-    document.addEventListener('co:langchange', () => { rebuildI18nConstants(); render(); });
+    // CO-556: a language switch must re-render the UI from EXISTING cached state
+    // only — never re-fetch. setLang() already swapped all [data-i18n] DOM text;
+    // here we rebuild the JS-built i18n constants and re-render the current view
+    // with refetch:false so no apiFetch fires (a burst of requests was tripping the
+    // server rate limiter and stacking "rate limit" error popups on every toggle).
+    document.addEventListener('co:langchange', (e) => {
+        rebuildI18nConstants();
+        render({ refetch: false });
+        // CO-555: render({refetch:false}) deliberately SKIPS renderConteudo so the
+        // 6-entry fan-out (CO-556 rate-limit burst) never fires — but that left the
+        // Conteúdo body in the old language. Re-render just the current entry via a
+        // SINGLE fetch of its language twin (en/<slug> ↔ base). At most one /api/
+        // entry request per toggle; missing twin keeps the current language silently.
+        const lang = (e.detail && e.detail.lang) || window.currentLang;
+        if (state.view === 'conteudo') {
+            retranslateConteudoDetail(lang);
+        }
+        // CO-555: the board root renders the universe index via renderUniverseHome
+        // (universe-home-view), not the Conteúdo detail controller — so the call
+        // above no-ops there. Swap that home/index body from its language twin too.
+        // Guarded by the universe-home-view class, so it's a no-op (zero fetches)
+        // whenever the home isn't on screen; never both this and the detail path fetch.
+        retranslateUniverseHome(lang);
+    });
 
     // CO-358: header overflow menu — visible at ≤640px
     setupHeaderOverflowMenu();
@@ -878,8 +911,10 @@ function setupHeaderOverflowMenu() {
     document.getElementById('overflow-lang-toggle')?.addEventListener('click', () => {
         menu.classList.add('hidden');
         btn.setAttribute('aria-expanded', 'false');
+        // CO-556: setLang() dispatches co:langchange, whose single global handler
+        // re-renders (refetch:false). No explicit render() here — that produced a
+        // second, network-refetching render per click (rate-limit popup burst).
         window.setLang(window.currentLang === 'pt' ? 'en' : 'pt');
-        render();
     });
 
     // Overflow: universe info
@@ -970,7 +1005,17 @@ async function init() {
     window.setLang(window.currentLang);
 
     const btnHeaderLang = document.getElementById('btn-header-lang');
-    if (btnHeaderLang) btnHeaderLang.addEventListener('click', () => { window.setLang(window.currentLang === 'pt' ? 'en' : 'pt'); render(); });
+    if (btnHeaderLang) btnHeaderLang.addEventListener('click', (e) => {
+        // Segmented PT | EN control: a click on a segment selects that language;
+        // a click elsewhere on the pill toggles. Active segment is highlighted by
+        // CSS via <html lang>, which window.setLang() keeps in sync.
+        const seg = e.target.closest('[data-lang]');
+        const next = seg ? seg.dataset.lang : (window.currentLang === 'pt' ? 'en' : 'pt');
+        if (next === window.currentLang) return;
+        // CO-556: setLang() dispatches co:langchange → single global re-render
+        // (refetch:false). No explicit render() — it double-fired and refetched.
+        window.setLang(next);
+    });
 
     renderHeaderUserArea(null);
     initTimelineStart();

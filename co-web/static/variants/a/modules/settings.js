@@ -6,9 +6,23 @@ import { THEME_PALETTE_MAP, THEME_COMPANION, DARK_THEMES } from './constants.js'
 import { openDeleteUniverseModal } from './sidebar/universe-actions.js';
 
 // ===== Toast system =====
+// CO-556: de-dupe identical toasts within a short window so a burst of identical
+// errors (e.g. several rate-limit 429s firing at once) can never stack into many
+// stacked popups. Keyed by type|message; the map is pruned on each call.
+const _recentToasts = new Map();
+const _TOAST_DEDUPE_MS = 3000;
+
 export function showToast(message, type) {
     const container = document.getElementById('toast-container');
     if (!container) return;
+
+    const now = Date.now();
+    const key = (type || 'success') + '|' + message;
+    for (const [k, ts] of _recentToasts) {
+        if (now - ts > _TOAST_DEDUPE_MS) _recentToasts.delete(k);
+    }
+    if (_recentToasts.has(key)) return; // identical toast still within the window
+    _recentToasts.set(key, now);
 
     const toast = document.createElement('div');
     toast.className = 'toast toast-' + (type || 'success');

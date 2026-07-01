@@ -813,6 +813,17 @@
             'conversas.empty': 'Select a conversation.',
             'conversas.dm_button': '📩 Send message',
             'conversas.filter_members': 'Filter members…',
+            // CO-38: Yggdrasil minigames hub (parity with pt)
+            'ygg.title': 'Yggdrasil',
+            'ygg.subtitle': 'Minigames hub — profiles and rankings',
+            'ygg.login_required': 'Sign in to play',
+            'ygg.login_cta': 'Create a free account to access the minigames hub, player profiles and global rankings.',
+            'ygg.play': 'PLAY',
+            'ygg.best': 'Best',
+            'ygg.global_rank': 'Global Ranking',
+            'ygg.recent': 'Recent Activity',
+            'ygg.games': 'Games',
+            'ygg.back': 'Yggdrasil',
             // CO-232: deep-link 404 view
             'not_found.title': 'Page not found',
             'not_found.subtitle': 'This content does not exist in this universe.',
@@ -856,6 +867,47 @@
         return (I18N[_lang] || I18N.pt)[key] || key;
     }
 
+    // CO-556/CO-557: content pages have slug-parallel pt/en twins (`/sobre` ↔
+    // `/en/sobre`, `/template/sobre` ↔ `/template/en/sobre`). The language toggle
+    // must switch BOTH the chrome strings (above) AND the content (by navigating
+    // to the counterpart). Keep this slug list in sync with
+    // `co-web/src/platform/pretty_urls.rs::TEMPLATE_SLUGS`.
+    var CONTENT_SLUGS = [
+        'sobre', 'termos', 'privacidade', 'dados-rastreados',
+        'linhas-do-tempo', 'co-plataforma', 'guia',
+    ];
+
+    // Classify a content pathname into its pt/en twins, or null when it is not a
+    // known content page (so the board SPA is never redirected by the toggle).
+    function contentPage(pathname) {
+        var p = (pathname || '').replace(/\/+$/, '');
+        var m;
+        if ((m = p.match(/^\/en\/([a-z0-9-]+)$/))) {
+            return { lang: 'en', pt: '/' + m[1], en: '/en/' + m[1] };
+        }
+        if ((m = p.match(/^\/template\/en\/([a-z0-9-]+)$/))) {
+            return { lang: 'en', pt: '/template/' + m[1], en: '/template/en/' + m[1] };
+        }
+        if ((m = p.match(/^\/template\/([a-z0-9-]+)$/)) && CONTENT_SLUGS.indexOf(m[1]) >= 0) {
+            return { lang: 'pt', pt: '/template/' + m[1], en: '/template/en/' + m[1] };
+        }
+        if ((m = p.match(/^\/([a-z0-9-]+)$/)) && CONTENT_SLUGS.indexOf(m[1]) >= 0) {
+            return { lang: 'pt', pt: '/' + m[1], en: '/en/' + m[1] };
+        }
+        return null;
+    }
+
+    // Navigate to the content counterpart in `lang` when the current page is a
+    // content page whose URL is in the *other* language. Returns true if it
+    // triggered a navigation. No-op (false) on the board SPA or when already in
+    // the requested language form — so it never loops.
+    function maybeSwitchContent(lang) {
+        var cp = contentPage(window.location.pathname);
+        if (!cp || cp.lang === lang) return false;
+        window.location.assign(lang === 'en' ? cp.en : cp.pt);
+        return true;
+    }
+
     function setLang(lang) {
         if (lang !== 'pt' && lang !== 'en') return;
         _lang = lang;
@@ -868,12 +920,21 @@
         });
         document.documentElement.lang = lang === 'pt' ? 'pt-BR' : 'en';
         document.dispatchEvent(new CustomEvent('co:langchange', { detail: { lang: lang } }));
+        // Switch the page CONTENT too (content pages only; board SPA unaffected).
+        maybeSwitchContent(lang);
     }
 
-    // Initialize: only respect cookie if it was set by an explicit user action.
-    // Bumped cookie name to co_lang2 to invalidate stale en cookies from prior sessions.
+    // Initialize: a content URL is authoritative for its own language (so the
+    // chrome on `/en/sobre` is English even before the cookie is read, and the
+    // startup setLang() never bounces between twins). Otherwise respect an
+    // explicit cookie, else default to Portuguese.
+    // Cookie name is co_lang2 to invalidate stale en cookies from prior sessions.
+    var urlPage = contentPage(window.location.pathname);
     var cookieLang = getCookie('co_lang2');
-    if (cookieLang === 'pt' || cookieLang === 'en') {
+    if (urlPage) {
+        _lang = urlPage.lang;
+        setCookie('co_lang2', _lang);
+    } else if (cookieLang === 'pt' || cookieLang === 'en') {
         _lang = cookieLang;
     } else {
         _lang = 'pt'; // default to Portuguese

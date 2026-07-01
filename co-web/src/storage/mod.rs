@@ -26,6 +26,13 @@ pub struct LogDrainEvent {
 
 pub(crate) const SEED_TEMPLATE_INDEX_MD: &str = include_str!("../../seed/template/index.md");
 pub(crate) const SEED_SOBRE_MD: &str = include_str!("../../seed/template/sobre.md");
+
+// CO-555: English mirror of the template intro pages, produced by the modular
+// translator (`scripts/i18n/translate.py --to en`) and ingested at boot as
+// language-tagged entries (`language: en`, path `en/<slug>`). New paths ⇒ never
+// clobbered by the pt reseed above.
+pub(crate) const SEED_EN_INDEX_MD: &str = include_str!("../../seed/template/en/index.md");
+pub(crate) const SEED_EN_SOBRE_MD: &str = include_str!("../../seed/template/en/sobre.md");
 pub(crate) const SEED_TERMOS_MD: &str = include_str!("../../seed/template/termos.md");
 pub(crate) const SEED_PRIVACIDADE_MD: &str = include_str!("../../seed/template/privacidade.md");
 pub(crate) const SEED_DADOS_RASTREADOS_MD: &str =

@@ -249,6 +249,65 @@ pub(super) async fn serve_deep_link(
     response
 }
 
+/// True when the template universe holds an indexed entry at `path`.
+fn template_entry_exists(state: &AppState, path: &str) -> bool {
+    let uc = {
+        let storage = state.core.storage.lock();
+        storage.universe_conn("template")
+    };
+    crate::repository::SqliteEntryRepository::new(uc)
+        .get("template", path)
+        .ok()
+        .flatten()
+        .is_some()
+}
+
+/// CO-557: `/en/<slug>` → the English mirror entry `en/<slug>.md` in the
+/// `template` universe (served via `/template/en/<slug>`), persisting the
+/// English UI preference in `co_lang`.
+///
+/// If the en mirror for that slug does not exist (it is generated lazily per
+/// page), fall back to the Portuguese page (`/<slug>` → `/template/<slug>`)
+/// rather than 404 — slugs always resolve, language degrades gracefully.
+pub(super) async fn serve_en_page(
+    axum::extract::Path(slug): axum::extract::Path<String>,
+    State(state): State<AppState>,
+) -> Response {
+    // Only known seed-page slugs (plus the en home `index`) map to a mirror.
+    let known = slug == "index" || crate::pretty_urls::is_seed_page_slug(&slug);
+    if !known {
+        // Unknown slug under /en/: let the SPA render its own route/404.
+        return (StatusCode::NOT_FOUND, "Not found").into_response();
+    }
+
+    let en_path = format!("en/{slug}.md");
+    let target = if template_entry_exists(&state, &en_path) {
+        format!("/template/en/{slug}")
+    } else if slug == "index" {
+        "/".to_string()
+    } else {
+        // Fall back to the pt page rather than 404.
+        crate::pretty_urls::slug_redirect_target(&slug).unwrap_or_else(|| "/".to_string())
+    };
+
+    let mut response = axum::response::Redirect::temporary(&target).into_response();
+    // Landing on /en/* expresses an English preference — persist it so the SPA
+    // chrome and subsequent loads default to en.
+    if let Ok(v) = "co_lang=en; Path=/; SameSite=Lax; Max-Age=31536000".parse() {
+        response.headers_mut().append(header::SET_COOKIE, v);
+    }
+    response
+}
+
+/// CO-557: `/en` (bare) → English home, persisting the English preference.
+pub(super) async fn serve_en_index() -> Response {
+    let mut response = axum::response::Redirect::temporary("/").into_response();
+    if let Ok(v) = "co_lang=en; Path=/; SameSite=Lax; Max-Age=31536000".parse() {
+        response.headers_mut().append(header::SET_COOKIE, v);
+    }
+    response
+}
+
 /// CO-335: Serve the graph viewer page at `/{slug}/graph`.
 pub(super) async fn serve_graph_page(State(state): State<AppState>) -> Response {
     let embed_path = "shared/graph.html";

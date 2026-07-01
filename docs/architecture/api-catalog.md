@@ -957,6 +957,7 @@ CO-372: Sprint calendar with Definition of Done + ICS export. Public endpoints, 
 | Path | Purpose |
 |---|---|
 | `/` `/{slug}` `/{slug}/{*subpath}` | SPA shell (serve_co_index) |
+| `/en` `/en/` `/en/{slug}` | CO-557 English mirror — 307 to /template/en/{slug} (pt fallback when no mirror); sets co_lang=en |
 | `/admin` | Admin page (server-side auth) |
 | `/repl` | REPL shell over interactions API |
 | `/storage` | Storage dashboard page |

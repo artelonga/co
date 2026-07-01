@@ -260,3 +260,97 @@ async fn test_ts_agent_session_post_and_get() {
         "created session must appear in list; sessions = {sessions:?}"
     );
 }
+
+// ─── CO-557: i18n routing (/en/<slug> ↔ /<slug>) ─────────────────────────────
+
+/// A `reqwest::Client` that does NOT follow redirects (so we can assert the
+/// 307 + Location of the pretty-URL handlers).
+fn no_redirect_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .expect("non-redirecting client")
+}
+
+/// CO-555: the English mirror is ingested at boot — the en entry exists with
+/// `language: en` at the slug-parallel path.
+#[tokio::test]
+async fn test_ts_en_mirror_entry_exists() {
+    let server = testkit::TestServer::start().await;
+    let resp = server
+        .client()
+        .get(server.url("/api/v1/universes/template/entries/en/sobre.md"))
+        .send()
+        .await
+        .expect("GET en/sobre.md");
+    assert!(
+        resp.status().is_success(),
+        "en/sobre.md must exist: {}",
+        resp.status()
+    );
+    let body: serde_json::Value = resp.json().await.expect("entry JSON");
+    let fm = &body["frontmatter"];
+    assert_eq!(fm["language"], "en", "en mirror must be language-tagged");
+}
+
+/// CO-557: `/en/sobre` resolves to the en mirror via `/template/en/sobre` and
+/// persists the English preference in `co_lang`.
+#[tokio::test]
+async fn test_ts_en_slug_resolves_to_mirror() {
+    let server = testkit::TestServer::start().await;
+    let resp = no_redirect_client()
+        .get(server.url("/en/sobre"))
+        .send()
+        .await
+        .expect("GET /en/sobre");
+    assert_eq!(resp.status().as_u16(), 307, "pretty-URL redirect");
+    let loc = resp
+        .headers()
+        .get("location")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    assert_eq!(loc, "/template/en/sobre", "links to en counterpart");
+    let cookie = resp
+        .headers()
+        .get("set-cookie")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    assert!(cookie.contains("co_lang=en"), "persists en preference");
+}
+
+/// CO-557: a slug with no en mirror falls back to the pt page rather than 404.
+#[tokio::test]
+async fn test_ts_en_slug_without_mirror_falls_back_to_pt() {
+    let server = testkit::TestServer::start().await;
+    // `termos` is a known seed slug but only index+sobre are mirrored at boot.
+    let resp = no_redirect_client()
+        .get(server.url("/en/termos"))
+        .send()
+        .await
+        .expect("GET /en/termos");
+    assert_eq!(resp.status().as_u16(), 307);
+    let loc = resp
+        .headers()
+        .get("location")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    assert_eq!(loc, "/template/termos", "falls back to pt page, not 404");
+}
+
+/// CO-557: the pt pretty-URL counterpart is unchanged (`/sobre` → /template/sobre).
+#[tokio::test]
+async fn test_ts_pt_slug_unchanged() {
+    let server = testkit::TestServer::start().await;
+    let resp = no_redirect_client()
+        .get(server.url("/sobre"))
+        .send()
+        .await
+        .expect("GET /sobre");
+    assert_eq!(resp.status().as_u16(), 307);
+    let loc = resp
+        .headers()
+        .get("location")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    assert_eq!(loc, "/template/sobre");
+}

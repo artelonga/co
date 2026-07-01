@@ -379,6 +379,12 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         // the `{*subpath}` wildcard below, so add an explicit trailing-slash route
         // to serve the SPA shell. Without this, `/entrar/`, `/sobre/`, `/termos/` 404.
         .route("/{slug}/", get(serve_co_index))
+        // CO-557: English mirror routes — `/en` (home) and `/en/<slug>` resolve to
+        // the language-tagged `en/<slug>` entries; static `/en/` prefix wins over
+        // the `/{slug}/{*subpath}` wildcard below.
+        .route("/en", get(serve_en_index))
+        .route("/en/", get(serve_en_index))
+        .route("/en/{slug}", get(serve_en_page))
         // CO-354: suggest form + owner review queue — before the {*subpath} wildcard.
         .route("/{slug}/suggest", get(serve_suggest_page))
         .route("/{slug}/review", get(serve_review_page))

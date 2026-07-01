@@ -47,8 +47,9 @@ export function setupLoginModal() {
 
     if (btnLang) {
         btnLang.addEventListener('click', () => {
+            // CO-556: setLang() dispatches co:langchange → single global re-render
+            // (refetch:false). No explicit _render() — it double-fired and refetched.
             window.setLang(window.currentLang === 'pt' ? 'en' : 'pt');
-            _render();
         });
     }
 
