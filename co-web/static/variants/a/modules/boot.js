@@ -89,6 +89,12 @@ export async function renderUniverseHome() {
     const isParent = info.is_template === true || slug === 'template';
     const explorarPanel = isParent ? await buildExplorarPanel(slug) : null;
 
+    // CO-555: drop any stale Conteúdo detail controller left on #content by a
+    // prior conteudo render. Without this a language toggle could fan out to BOTH
+    // retranslateConteudoDetail (via the leftover controller) and
+    // retranslateUniverseHome, doubling the /api/ request. The home view owns the
+    // node now, so a single twin fetch per toggle is guaranteed.
+    delete content._detailController;
     content.className = 'content universe-home-view';
     content.innerHTML = `
         <div class="universe-home">
@@ -115,7 +121,12 @@ export async function renderUniverseHome() {
     if (indexEntry && indexEntry.body) {
         const md = window.CoMarkdown;
         const html = md ? md.renderMarkdown(indexEntry.body) : esc(indexEntry.body);
-        body.innerHTML = `<article class="universe-home-md md-body">${html}</article>`;
+        // CO-555: the index markdown lives in its own swappable wrapper so a
+        // language toggle can re-render just this body from the `en/index.md`
+        // twin (retranslateUniverseHome) without re-running the whole home
+        // fan-out. `data-index-path` records which twin is currently displayed.
+        body.dataset.indexPath = 'index.md';
+        body.innerHTML = `<article class="universe-home-md md-body"><div class="universe-home-index-body">${html}</div></article>`;
         if (md && typeof md.renderMermaidBlocks === 'function') {
             md.renderMermaidBlocks(body);
         }
@@ -158,6 +169,62 @@ export async function renderUniverseHome() {
             </p>
             ${totalEntries ? `<p style="color:var(--text-muted,#6b7280);font-size:13px">Há <strong>${totalEntries}</strong> entrada(s) neste universo. Acesse pelo menu lateral ou pela visão Conteúdo.</p>` : ''}
         </div>`;
+}
+
+// CO-555: re-render the board-root home/index body in the target language.
+//
+// At the board root (no selected project) the universe index is rendered by
+// renderUniverseHome — NOT by the Conteúdo detail controller — so
+// retranslateConteudoDetail finds no current entry and no-ops, leaving the body
+// in Portuguese after a toggle. This swaps just the index markdown for its
+// language twin (`en/index.md` when EN, base `index.md` when PT) via a SINGLE
+// raw fetch (silent on 404, like the detail-page path). At most one /api/
+// request per toggle, never the renderUniverseHome fan-out. If the twin is
+// missing the current language is kept gracefully — no popup.
+export async function retranslateUniverseHome(targetLang) {
+    const content = document.querySelector('#content');
+    if (!content || !content.classList.contains('universe-home-view')) return;
+    const body = content.querySelector('#universe-home-body');
+    if (!body) return;
+    const indexEl = body.querySelector('.universe-home-index-body');
+    // No swappable index body → empty-state home or still loading; nothing to do.
+    if (!indexEl) return;
+
+    const slug = state.currentUniverseSlug;
+    if (!slug) return;
+
+    const curPath = body.dataset.indexPath || 'index.md';
+    const EN_PREFIX = 'en/';
+    const isEnPath = curPath.startsWith(EN_PREFIX);
+    let twinPath;
+    if (targetLang === 'en') {
+        twinPath = isEnPath ? curPath : EN_PREFIX + curPath;
+    } else {
+        twinPath = isEnPath ? curPath.slice(EN_PREFIX.length) : curPath;
+    }
+    // Already displaying the target language → no fetch, no work.
+    if (!twinPath || twinPath === curPath) return;
+
+    const encoded = twinPath.split('/').map(encodeURIComponent).join('/');
+
+    // Raw fetch (not apiFetch) so a missing twin (404) is silent — apiFetch
+    // surfaces a "Request error" toast on non-401 failures, which we don't want.
+    let twin = null;
+    try {
+        const r = await window.fetch(
+            `/api/v1/universes/${encodeURIComponent(slug)}/entries/${encoded}`,
+            { credentials: 'same-origin' }
+        );
+        if (r.ok) twin = await r.json();
+    } catch (_) { /* network blip → keep current language gracefully */ }
+
+    if (!twin || !twin.body) return; // missing twin → keep current silently
+    const md = window.CoMarkdown;
+    indexEl.innerHTML = md ? md.renderMarkdown(twin.body) : esc(twin.body);
+    if (md && typeof md.renderMermaidBlocks === 'function') {
+        md.renderMermaidBlocks(indexEl);
+    }
+    body.dataset.indexPath = twinPath;
 }
 
 export async function bootApp(getProjects, selectProject) {

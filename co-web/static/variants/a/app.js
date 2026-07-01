@@ -51,7 +51,7 @@ import { setupOnboarding, setupCriarModal, openCriarModal, injectOnboardingCallb
 import { bootYggdrasil, injectYggdrasilCallbacks } from './modules/yggdrasil.js';
 import {
     bootAppForUniverse, renderUniverseHome, bootApp as _bootApp,
-    injectBootCallbacks,
+    injectBootCallbacks, retranslateUniverseHome,
 } from './modules/boot.js';
 import {
     setupInvitationsPage, setupInvitationsPanel,
@@ -857,9 +857,16 @@ function bindStaticEvents() {
         // Conteúdo body in the old language. Re-render just the current entry via a
         // SINGLE fetch of its language twin (en/<slug> ↔ base). At most one /api/
         // entry request per toggle; missing twin keeps the current language silently.
+        const lang = (e.detail && e.detail.lang) || window.currentLang;
         if (state.view === 'conteudo') {
-            retranslateConteudoDetail((e.detail && e.detail.lang) || window.currentLang);
+            retranslateConteudoDetail(lang);
         }
+        // CO-555: the board root renders the universe index via renderUniverseHome
+        // (universe-home-view), not the Conteúdo detail controller — so the call
+        // above no-ops there. Swap that home/index body from its language twin too.
+        // Guarded by the universe-home-view class, so it's a no-op (zero fetches)
+        // whenever the home isn't on screen; never both this and the detail path fetch.
+        retranslateUniverseHome(lang);
     });
 
     // CO-358: header overflow menu — visible at ≤640px
