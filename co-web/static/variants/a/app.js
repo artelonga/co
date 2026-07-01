@@ -761,6 +761,9 @@ let _notifSetupDone = false;
 // ===== Static DOM event bindings =====
 function bindStaticEvents() {
     document.querySelectorAll('#view-tabs .view-tab').forEach(tab => tab.addEventListener('click', () => switchView(tab.dataset.view)));
+    // CO-558: reflect a `?view=` deep-link (e.g. the /changelog redirect →
+    // `?view=changelog`) in the active tab; the default markup marks 'conteudo'.
+    document.querySelectorAll('#view-tabs .view-tab').forEach(tab => tab.classList.toggle('active', tab.dataset.view === state.view));
     document.querySelectorAll('#zoom-tabs .view-tab').forEach(tab => tab.addEventListener('click', () => switchZoom(tab.dataset.zoom)));
 
     document.querySelector('#btn-prev').addEventListener('click', () => {

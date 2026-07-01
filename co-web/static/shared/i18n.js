@@ -289,7 +289,7 @@
             // CO-280 Phase 1: three-section sidebar (Platforms / This universe / Tools)
             'sidebar.section.platforms': 'Plataformas',
             'sidebar.section.this_universe': 'Este universo',
-            'sidebar.section.tools': 'Ferramentas',
+            'sidebar.section.tools': 'Gestão',
             'sidebar.tool.deployments': 'Implantações',
             'sidebar.tool.changelog': 'Histórico',
             // CO-253: Subscribe prompt
@@ -708,7 +708,7 @@
             // CO-280 Phase 1: three-section sidebar (Platforms / This universe / Tools)
             'sidebar.section.platforms': 'Platforms',
             'sidebar.section.this_universe': 'This universe',
-            'sidebar.section.tools': 'Tools',
+            'sidebar.section.tools': 'Management',
             'sidebar.tool.deployments': 'Deployments',
             'sidebar.tool.changelog': 'Changelog',
             // CO-253: Subscribe prompt
