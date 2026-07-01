@@ -1,14 +1,16 @@
-// ===== CO-280 Phase 1: Tools section =====
+// ===== CO-280 Phase 1: Gestão (management) section — CO-559 =====
 // Renders dev/operator tools as a muted bottom-of-sidebar section. Items here
 // should be clearly distinct from end-user navigation. The user-reported
 // "sidebar.co_dev_ship button is weird" symptom traces back to dev-flavored
 // affordances mixed into the same visual treatment as project nav — this
 // section gives them a dedicated home.
 //
-// Phase 1 scope: scaffold the section with the deployments + changelog links
-// that already exist as routes. Future phases (CO-280 Phase 2/3) will audit
-// individual tool entries (co-auto ship, admin dashboard, etc.) and gate by
-// admin role.
+// Phase 1 scope: scaffold the section with the deployments link that already
+// exists as a route. Future phases (CO-280 Phase 2/3) will audit individual
+// entries (co-auto ship, admin dashboard, etc.) and gate by admin role.
+// CO-559: this is the "Gestão"/"Management" section (admin actions), not the
+// CO-503 on-demand "Tools" surface. CO-558: the changelog was removed from this
+// list — it lives only on the board's Histórico view-tab.
 import { esc } from '../helpers.js';
 
 function renderToolItem(t) {
@@ -24,11 +26,12 @@ export function renderTools() {
     const root = document.querySelector('#tools-nav');
     if (!root) return;
     const t = window.t || (k => k);
-    // Tools list is intentionally small in Phase 1 — links to existing
-    // operator routes. Add to this list as new dev/admin actions emerge.
+    // CO-559: this is the "Gestão"/"Management" section — admin/operator actions,
+    // not CO-503 on-demand tools. CO-558: the changelog is not listed here; it has
+    // a single home as the board's Histórico view-tab (the standalone /changelog
+    // route redirects there), so Gestão holds only Deployments.
     const items = [
         { key: 'deployments', label: t('sidebar.tool.deployments') || 'Deployments', href: '/deployments' },
-        { key: 'changelog',   label: t('sidebar.tool.changelog')   || 'Changelog',   href: '/changelog' },
     ];
     root.innerHTML = items.map(renderToolItem).join('');
 }
